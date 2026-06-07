@@ -7,6 +7,8 @@ import {
   getWatermarkStatus, ensurePageSpace, buildFileName,
   fmtDate, fmtBDT, fmtAmount, bengaliCellHook,
   DARK, LIGHT_BG, BRAND_ORANGE, MUTED,
+  FINANCIAL_CARD_GRAY, FINANCIAL_CARD_ORANGE,
+  formatPublicTrackingId, formatPublicTrackingIdForFile,
   loadLogoBase64,
   type SummaryCard, type InfoField, type PdfCompanyConfig, type SignatureData,
 } from "./pdfCore";
@@ -130,13 +132,7 @@ const cleanText = (...values: unknown[]): string => {
   return "";
 };
 
-const toPublicTrackingId = (value?: string | null): string => {
-  const normalized = cleanText(value).toUpperCase();
-  if (!normalized) return "";
-  if (normalized.startsWith("MTH-")) return normalized;
-  if (normalized.startsWith("RK-")) return `MTH-${normalized.slice(3)}`;
-  return normalized;
-};
+const toPublicTrackingId = formatPublicTrackingId;
 
 const resolvePackageName = (value: unknown): string => {
   if (Array.isArray(value)) {
@@ -260,7 +256,7 @@ function addFinancialSummary(
 
   // ── Card 1 (light gray): Gross / Discount / Net Total ──
   const card1H = 26;
-  doc.setFillColor(238, 238, 238); // very light gray
+  doc.setFillColor(FINANCIAL_CARD_GRAY.r, FINANCIAL_CARD_GRAY.g, FINANCIAL_CARD_GRAY.b);
   doc.rect(boxX, y, boxW, card1H, "F");
 
   const labelX = boxX + 6;
@@ -290,7 +286,7 @@ function addFinancialSummary(
   const gap = 3;
   const card2Y = y + card1H + gap;
   const card2H = 19;
-  doc.setFillColor(245, 235, 220); // beige
+  doc.setFillColor(FINANCIAL_CARD_ORANGE.r, FINANCIAL_CARD_ORANGE.g, FINANCIAL_CARD_ORANGE.b);
   doc.rect(boxX, card2Y, boxW, card2H, "F");
 
   let jy = card2Y + 7;
@@ -424,6 +420,7 @@ async function generateIndividualInvoice(
       4: { halign: "right", fontStyle: "bold" },
     },
     fontSize: 9,
+    variant: "invoice",
   });
 
   // Financial summary — right-aligned matching sample
@@ -497,6 +494,7 @@ async function generateFamilyInvoice(
       5: { halign: "right" },
       6: { halign: "right", fontStyle: "bold" },
     },
+    variant: "invoice",
   });
 
   const familyDueAmount = Number(booking.due_amount || 0);
@@ -595,7 +593,7 @@ export async function generateInvoice(
     await generateIndividualInvoice(doc, normalizedBooking, customer, payments, logoBase64, sig, qrDataUrl, moallemName, cfg);
   }
 
-  doc.save(`Invoice-${toPublicTrackingId(normalizedBooking.tracking_id)}.pdf`);
+  doc.save(`Invoice-${formatPublicTrackingIdForFile(normalizedBooking.tracking_id)}.pdf`);
 }
 
 // ═══════════════════════════════════════════════════════════════

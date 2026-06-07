@@ -11,7 +11,7 @@ export async function generateTrackingQr(trackingId: string): Promise<string> {
   return QRCode.toDataURL(url, {
     width: 200,
     margin: 1,
-    color: { dark: "#282E38", light: "#FFFFFF" },
+    color: { dark: "#231F20", light: "#FFFFFF" },
     errorCorrectionLevel: "M",
   });
 }

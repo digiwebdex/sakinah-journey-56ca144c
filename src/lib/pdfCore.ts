@@ -16,13 +16,16 @@ import { formatBDT, formatAmount } from "@/lib/utils";
 // ═══════════════════════════════════════════════════════════════
 // BRAND CONSTANTS
 // ═══════════════════════════════════════════════════════════════
-export const BRAND_ORANGE = { r: 243, g: 146, b: 55 }; // Logo orange
-export const DARK = { r: 51, g: 51, b: 51 };
+export const BRAND_ORANGE = { r: 243, g: 112, b: 33 }; // #F37021 — sample invoice orange
+export const DARK = { r: 35, g: 31, b: 32 }; // #231F20 — sample body text
 export const DARK_BG = { r: 55, g: 55, b: 55 }; // Footer bar
 export const LIGHT_BG = { r: 248, g: 248, b: 248 };
 export const MUTED = { r: 120, g: 120, b: 120 };
-export const TABLE_HEADER = { r: 50, g: 50, b: 50 }; // Dark black table header matching sample
-export const BEIGE_BG = { r: 245, g: 235, b: 220 }; // Beige background for financial summary
+export const TABLE_HEADER = { r: 35, g: 31, b: 32 }; // #231F20 — sample table header
+export const TABLE_ROW_BG = { r: 242, g: 242, b: 242 }; // #F2F2F2 — sample table rows
+export const FINANCIAL_CARD_GRAY = { r: 242, g: 242, b: 242 }; // #F2F2F2
+export const FINANCIAL_CARD_ORANGE = { r: 253, g: 233, b: 217 }; // #FDE9D9
+export const BEIGE_BG = FINANCIAL_CARD_ORANGE;
 export const WHITE = { r: 255, g: 255, b: 255 };
 
 // Legacy aliases
@@ -71,6 +74,45 @@ export function getPageHeight(doc: jsPDF): number {
   return doc.internal.pageSize.getHeight();
 }
 
+/** Display format on PDF: `MTH ESD40001` (space, no hyphen) — matches sample invoice */
+export function formatPublicTrackingId(value?: string | null): string {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (!normalized) return "";
+  const suffix = normalized.replace(/^MTH[-\s]?/i, "").replace(/^RK[-\s]?/i, "");
+  if (suffix !== normalized) return `MTH ${suffix}`;
+  return normalized.replace(/-/g, " ");
+}
+
+/** Filesystem-safe tracking id (hyphens) */
+export function formatPublicTrackingIdForFile(value?: string | null): string {
+  return formatPublicTrackingId(value).replace(/\s+/g, "-");
+}
+
+/** Render cursive "Thank You" via canvas (jsPDF has no script font) */
+function renderScriptTextImage(
+  text: string,
+  fontSizePt: number,
+  color = "#FFFFFF"
+): { dataUrl: string; width: number; height: number } {
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d")!;
+  const scale = 3;
+  const px = fontSizePt * 1.33 * scale;
+  ctx.font = `${px}px "Brush Script MT", "Segoe Script", "Snell Roundhand", "Apple Chancery", cursive`;
+  const measured = ctx.measureText(text);
+  canvas.width = Math.ceil(measured.width + 8);
+  canvas.height = Math.ceil(px * 1.35);
+  ctx.font = `${px}px "Brush Script MT", "Segoe Script", "Snell Roundhand", "Apple Chancery", cursive`;
+  ctx.fillStyle = color;
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, 4, canvas.height / 2);
+  return {
+    dataUrl: canvas.toDataURL("image/png"),
+    width: canvas.width / scale,
+    height: canvas.height / scale,
+  };
+}
+
 // ═══════════════════════════════════════════════════════════════
 // LOGO LOADING
 // ═══════════════════════════════════════════════════════════════
@@ -103,7 +145,7 @@ export async function generateCompanyQr(url?: string): Promise<string> {
   try {
     return await QRCode.toDataURL(url || cfg.website, {
       width: 200, margin: 1,
-      color: { dark: "#333333", light: "#FFFFFF" },
+      color: { dark: "#231F20", light: "#FFFFFF" },
       errorCorrectionLevel: "M",
     });
   } catch { return ""; }
@@ -161,30 +203,27 @@ export async function addPdfHeader(
   doc.setFillColor(BRAND_ORANGE.r, BRAND_ORANGE.g, BRAND_ORANGE.b);
   doc.roundedRect(tabX, tabY, tabW, tabH, 6, 6, "F");
 
-  // QR code or "QR Code" text inside the tab
+  const drawQrCodeLabel = () => {
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.text("QR Code", tabX + tabW / 2, tabY + tabH - 14, { align: "center" });
+  };
+
+  // QR code inside tab (sample placeholder text when unavailable)
   if (qrDataUrl) {
     try {
-      const qrSize = 22;
+      const qrSize = 20;
       const qrX = tabX + (tabW - qrSize) / 2;
-      const qrY = tabY + tabH - qrSize - 4;
-      // White background behind QR for contrast
+      const qrY = tabY + tabH - qrSize - 6;
       doc.setFillColor(255, 255, 255);
       doc.roundedRect(qrX - 1, qrY - 1, qrSize + 2, qrSize + 2, 1, 1, "F");
       doc.addImage(qrDataUrl, "PNG", qrX, qrY, qrSize, qrSize);
     } catch {
-      // Fallback: render "QR Code" text centered
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(11);
-      doc.setFont("helvetica", "bold");
-      doc.text("QR", tabX + tabW / 2, tabY + tabH - 16, { align: "center" });
-      doc.text("Code", tabX + tabW / 2, tabY + tabH - 8, { align: "center" });
+      drawQrCodeLabel();
     }
   } else {
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(11);
-    doc.setFont("helvetica", "bold");
-    doc.text("QR", tabX + tabW / 2, tabY + tabH - 16, { align: "center" });
-    doc.text("Code", tabX + tabW / 2, tabY + tabH - 8, { align: "center" });
+    drawQrCodeLabel();
   }
 
   doc.setTextColor(0);
@@ -274,13 +313,20 @@ export function addPdfFooter(doc: jsPDF, cfg: PdfCompanyConfig, options?: { show
     doc.text(cfg.email || "manasiktravelhub.info@gmail.com", centerX, barY + 10);
     doc.text("manasiktravelhub.com", centerX, barY + 16);
 
-    // Thank You — right side (script/cursive style)
-    doc.setFontSize(16);
-    doc.setFont("helvetica", "bolditalic");
-    doc.setTextColor(255);
-    doc.text("Thank You", pw - MARGIN - 4, barY + 10, { align: "right" });
+    // Thank You — right side (script/cursive via canvas)
+    try {
+      const script = renderScriptTextImage("Thank You", 18, "#FFFFFF");
+      const scriptX = pw - MARGIN - 4 - script.width;
+      doc.addImage(script.dataUrl, "PNG", scriptX, barY + 2, script.width, script.height);
+    } catch {
+      doc.setFontSize(16);
+      doc.setFont("helvetica", "bolditalic");
+      doc.setTextColor(255);
+      doc.text("Thank You", pw - MARGIN - 4, barY + 10, { align: "right" });
+    }
     doc.setFontSize(6.5);
     doc.setFont("helvetica", "bold");
+    doc.setTextColor(255);
     doc.text("Stay With MANASIK TRAVEL HUB", pw - MARGIN - 4, barY + 17, { align: "right" });
 
     // Page numbers
@@ -685,7 +731,7 @@ export function addFinancialBox(
 
   // Beige/tan background box matching sample
   const boxH = items.length * 7 + 8;
-  doc.setFillColor(245, 235, 220);
+  doc.setFillColor(FINANCIAL_CARD_ORANGE.r, FINANCIAL_CARD_ORANGE.g, FINANCIAL_CARD_ORANGE.b);
   doc.roundedRect(boxX, y - 2, boxW, boxH, 1.5, 1.5, "F");
 
   let iy = y + 4;
@@ -787,6 +833,8 @@ export interface PdfTableOptions {
   fontSize?: number;
   margin?: { left?: number; right?: number };
   didParseCell?: (data: any) => void;
+  /** `invoice` = light grey rows + white column dividers (sample invoice table) */
+  variant?: "default" | "invoice";
 }
 
 const getTableCellText = (data: any): string => {
@@ -860,6 +908,12 @@ export function addTable(doc: jsPDF, options: PdfTableOptions): number {
 // RAW TABLE (no BDT formatting, raw strings passed as-is)
 // ═══════════════════════════════════════════════════════════════
 export function addRawTable(doc: jsPDF, options: PdfTableOptions): number {
+  const isInvoice = options.variant === "invoice";
+  const bodyLineColor = isInvoice ? [255, 255, 255] as [number, number, number] : [220, 220, 220];
+  const bodyFill = isInvoice
+    ? [TABLE_ROW_BG.r, TABLE_ROW_BG.g, TABLE_ROW_BG.b] as [number, number, number]
+    : [255, 255, 255];
+
   autoTable(doc, {
     startY: options.startY,
     head: [options.head],
@@ -867,19 +921,22 @@ export function addRawTable(doc: jsPDF, options: PdfTableOptions): number {
     foot: options.foot,
     showHead: options.showHead || "everyPage",
     styles: {
-      fontSize: options.fontSize || 8,
-      cellPadding: 3,
+      fontSize: options.fontSize || (isInvoice ? 9 : 8),
+      cellPadding: isInvoice ? 3.5 : 3,
       font: "helvetica",
-      lineColor: [220, 220, 220],
-      lineWidth: 0.3,
+      fillColor: bodyFill,
+      lineColor: bodyLineColor,
+      lineWidth: isInvoice ? 0.6 : 0.3,
+      textColor: [DARK.r, DARK.g, DARK.b],
     },
     headStyles: {
       fillColor: [TABLE_HEADER.r, TABLE_HEADER.g, TABLE_HEADER.b],
       textColor: [255, 255, 255],
-      fontSize: options.fontSize || 8,
+      fontSize: options.fontSize || (isInvoice ? 9 : 8),
       font: "helvetica",
       fontStyle: "bold",
       cellPadding: 3.5,
+      lineColor: [TABLE_HEADER.r, TABLE_HEADER.g, TABLE_HEADER.b],
     },
     footStyles: {
       fillColor: [LIGHT_BG.r, LIGHT_BG.g, LIGHT_BG.b],
@@ -888,10 +945,19 @@ export function addRawTable(doc: jsPDF, options: PdfTableOptions): number {
       fontStyle: "bold",
       fontSize: 8.5,
     },
-    alternateRowStyles: { fillColor: [255, 255, 255] },
+    alternateRowStyles: isInvoice
+      ? { fillColor: [TABLE_ROW_BG.r, TABLE_ROW_BG.g, TABLE_ROW_BG.b] }
+      : { fillColor: [255, 255, 255] },
     columnStyles: options.columnStyles || {},
     margin: { left: options.margin?.left || MARGIN, right: options.margin?.right || MARGIN },
-    didParseCell: buildDidParseCell(options.didParseCell),
+    didParseCell: buildDidParseCell((data) => {
+      if (isInvoice && data.section === "body") {
+        data.cell.styles.fillColor = [TABLE_ROW_BG.r, TABLE_ROW_BG.g, TABLE_ROW_BG.b];
+        data.cell.styles.lineColor = [255, 255, 255];
+        data.cell.styles.lineWidth = 0.6;
+      }
+      options.didParseCell?.(data);
+    }),
     didDrawCell: bengaliCellHook,
   });
 
