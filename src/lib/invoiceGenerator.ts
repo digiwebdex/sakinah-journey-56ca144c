@@ -8,7 +8,8 @@ import {
   fmtDate, fmtBDT, fmtAmount, bengaliCellHook,
   DARK, LIGHT_BG, BRAND_ORANGE, MUTED,
   FINANCIAL_CARD_GRAY, FINANCIAL_CARD_ORANGE,
-  formatPublicTrackingId, formatPublicTrackingIdForFile,
+  formatPublicTrackingId, formatPublicTrackingIdForFile, formatBookingTrackingId,
+  FOOTER_HEIGHT,
   loadLogoBase64,
   type SummaryCard, type InfoField, type PdfCompanyConfig, type SignatureData,
 } from "./pdfCore";
@@ -79,13 +80,13 @@ export interface BookingMember {
 const fmtDateLocal = (d: string | null) =>
   d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
-const FOOTER_HEIGHT = 28;
+const FOOTER_HEIGHT_LOCAL = FOOTER_HEIGHT;
 const CONTENT_BOTTOM_PADDING = 4;
 const CONTINUATION_START_Y = 18;
 const MARGIN = 16;
 
 function getContentBottomY(doc: jsPDF): number {
-  return doc.internal.pageSize.getHeight() - FOOTER_HEIGHT - CONTENT_BOTTOM_PADDING;
+  return doc.internal.pageSize.getHeight() - FOOTER_HEIGHT_LOCAL - CONTENT_BOTTOM_PADDING;
 }
 
 function ensurePageSpaceLocal(doc: jsPDF, y: number, requiredHeight: number, nextPageStartY = CONTINUATION_START_Y): number {
@@ -384,10 +385,12 @@ async function generateIndividualInvoice(
   ];
 
   // Large INVOICE title is drawn inside addBillToAndMeta (right column)
+  const bookingTrackingId = formatBookingTrackingId(booking.tracking_id);
+
   const metaFields = [
     { label: "Invoice No", value: publicTrackingId },
     { label: "Invoice Date", value: fmtDateLocal(new Date().toISOString()) },
-    { label: "Booking ID", value: publicTrackingId },
+    { label: "Booking ID", value: bookingTrackingId },
     ...(booking.packages?.start_date ? [{ label: "Travel Date", value: fmtDateLocal(booking.packages.start_date) }] : []),
   ];
 
@@ -462,10 +465,12 @@ async function generateFamilyInvoice(
     { label: "Members", value: String(members.length || booking.num_travelers) },
   ];
 
+  const bookingTrackingId = formatBookingTrackingId(booking.tracking_id);
+
   const metaFields = [
     { label: "Invoice No", value: publicTrackingId },
     { label: "Invoice Date", value: fmtDateLocal(new Date().toISOString()) },
-    { label: "Booking ID", value: publicTrackingId },
+    { label: "Booking ID", value: bookingTrackingId },
     ...(booking.packages?.start_date ? [{ label: "Travel Date", value: fmtDateLocal(booking.packages.start_date) }] : []),
   ];
 

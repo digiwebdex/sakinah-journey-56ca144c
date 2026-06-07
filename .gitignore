@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Server secrets & runtime data (never commit)
+server/.env
+server/uploads/
+server/backups/

@@ -110,7 +110,41 @@ pm2 save
 pm2 startup  # Follow the instructions to auto-start on reboot
 ```
 
-### 6. Data Migration
+### 6. Nightly Backups (database + uploads)
+
+Automated backup script: `server/nightly-backup.sh`
+
+- **Database:** `pg_dump` → `server/backups/daily/manasik_db_*.sql.gz`
+- **Files:** `server/uploads/` → `server/backups/daily/manasik_uploads_*.tar.gz`
+- **Off-site:** copies to Google Drive (`Manasik Travel Hub/Backups/`) when `rclone` is configured
+- **Retention:** 30 days (local + Drive)
+
+Add to root crontab (runs daily at 2:15 AM):
+
+```bash
+15 2 * * * /var/www/manasik-travel-hub/server/nightly-backup.sh
+```
+
+Manual run:
+
+```bash
+/var/www/manasik-travel-hub/server/nightly-backup.sh
+tail -f /var/log/manasik-backup.log
+```
+
+Restore:
+
+```bash
+# Database (read DATABASE_URL from server/.env first)
+gunzip -c server/backups/daily/manasik_db_YYYY-MM-DD_HH-MM-SS.sql.gz | psql "$DATABASE_URL"
+
+# Uploads
+tar -xzf server/backups/daily/manasik_uploads_YYYY-MM-DD_HH-MM-SS.tar.gz -C server/
+```
+
+Admin panel JSON backups (`/api/backup/create`) are separate — useful for table-level restore, but do not include uploaded files.
+
+### 7. Data Migration
 
 Export data from Lovable Cloud and import to your PostgreSQL:
 - Use the site-backup feature in Admin Settings to export all data as JSON

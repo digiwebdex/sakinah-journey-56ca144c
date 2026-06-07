@@ -12,7 +12,19 @@ export default defineConfig(({ mode }) => ({
       overlay: false,
     },
   },
-  plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
+  plugins: [
+    react(),
+    mode === "development" && componentTagger(),
+    {
+      name: "html-build-cache-bust",
+      transformIndexHtml(html) {
+        return html.replace(
+          "</head>",
+          `  <meta name="app-build" content="${Date.now()}" />\n  </head>`
+        );
+      },
+    },
+  ].filter(Boolean),
   resolve: {
     alias: [
       { find: /^@\/integrations\/supabase\/client(.*)$/, replacement: path.resolve(__dirname, "./src/lib/api.ts") },

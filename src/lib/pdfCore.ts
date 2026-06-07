@@ -22,9 +22,9 @@ export const DARK_BG = { r: 55, g: 55, b: 55 }; // Footer bar
 export const LIGHT_BG = { r: 248, g: 248, b: 248 };
 export const MUTED = { r: 120, g: 120, b: 120 };
 export const TABLE_HEADER = { r: 35, g: 31, b: 32 }; // #231F20 — sample table header
-export const TABLE_ROW_BG = { r: 242, g: 242, b: 242 }; // #F2F2F2 — sample table rows
-export const FINANCIAL_CARD_GRAY = { r: 242, g: 242, b: 242 }; // #F2F2F2
-export const FINANCIAL_CARD_ORANGE = { r: 253, g: 233, b: 217 }; // #FDE9D9
+export const TABLE_ROW_BG = { r: 241, g: 241, b: 241 }; // #F1F1F1 — sample table rows
+export const FINANCIAL_CARD_GRAY = { r: 241, g: 241, b: 241 }; // #F1F1F1 — sample summary top
+export const FINANCIAL_CARD_ORANGE = { r: 253, g: 238, b: 230 }; // #FDEEE6 — sample summary bottom
 export const BEIGE_BG = FINANCIAL_CARD_ORANGE;
 export const WHITE = { r: 255, g: 255, b: 255 };
 
@@ -32,10 +32,11 @@ export const WHITE = { r: 255, g: 255, b: 255 };
 export const GOLD = BRAND_ORANGE;
 export const ORANGE = BRAND_ORANGE;
 
-export const FOOTER_HEIGHT = 42;
+export const FOOTER_HEIGHT = 29; // ~0.5in shorter than prior 42mm bar (1.14in total)
 const CONTENT_BOTTOM_PADDING = 4;
 const CONTINUATION_START_Y = 18;
-const MARGIN = 16;
+/** Shared left edge — logo, BILL TO, and section titles align here */
+export const MARGIN = 16;
 
 // ═══════════════════════════════════════════════════════════════
 // HELPERS
@@ -74,7 +75,7 @@ export function getPageHeight(doc: jsPDF): number {
   return doc.internal.pageSize.getHeight();
 }
 
-/** Display format on PDF: `MTH ESD40001` (space, no hyphen) — matches sample invoice */
+/** Invoice number on PDF: `MTH ESD40001` (space) — matches sample */
 export function formatPublicTrackingId(value?: string | null): string {
   const normalized = String(value || "").trim().toUpperCase();
   if (!normalized) return "";
@@ -83,9 +84,18 @@ export function formatPublicTrackingId(value?: string | null): string {
   return normalized.replace(/-/g, " ");
 }
 
+/** Booking ID on PDF: `MTH-ESD40001` (hyphen) — matches sample */
+export function formatBookingTrackingId(value?: string | null): string {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (!normalized) return "";
+  if (normalized.startsWith("MTH-")) return normalized;
+  if (normalized.startsWith("RK-")) return `MTH-${normalized.slice(3)}`;
+  return formatPublicTrackingId(value).replace(/\s+/g, "-");
+}
+
 /** Filesystem-safe tracking id (hyphens) */
 export function formatPublicTrackingIdForFile(value?: string | null): string {
-  return formatPublicTrackingId(value).replace(/\s+/g, "-");
+  return formatBookingTrackingId(value);
 }
 
 /** Render cursive "Thank You" via canvas (jsPDF has no script font) */
@@ -98,14 +108,15 @@ function renderScriptTextImage(
   const ctx = canvas.getContext("2d")!;
   const scale = 3;
   const px = fontSizePt * 1.33 * scale;
-  ctx.font = `${px}px "Brush Script MT", "Segoe Script", "Snell Roundhand", "Apple Chancery", cursive`;
+  const fontFamily = '"Brush Script MT", "Segoe Script", "Snell Roundhand", "Apple Chancery", cursive';
+  ctx.font = `${px}px ${fontFamily}`;
   const measured = ctx.measureText(text);
-  canvas.width = Math.ceil(measured.width + 8);
-  canvas.height = Math.ceil(px * 1.35);
-  ctx.font = `${px}px "Brush Script MT", "Segoe Script", "Snell Roundhand", "Apple Chancery", cursive`;
+  canvas.width = Math.ceil(measured.width + 6);
+  canvas.height = Math.ceil(px * 1.15);
+  ctx.font = `${px}px ${fontFamily}`;
   ctx.fillStyle = color;
   ctx.textBaseline = "middle";
-  ctx.fillText(text, 4, canvas.height / 2);
+  ctx.fillText(text, 3, canvas.height / 2);
   return {
     dataUrl: canvas.toDataURL("image/png"),
     width: canvas.width / scale,
@@ -118,6 +129,35 @@ function renderScriptTextImage(
 // ═══════════════════════════════════════════════════════════════
 let _logoCache: string | null = null;
 
+/** Crop transparent padding so the logo's left edge matches BILL TO alignment */
+function trimCanvasTransparentEdges(source: HTMLCanvasElement): string {
+  const ctx = source.getContext("2d")!;
+  const { width, height } = source;
+  const data = ctx.getImageData(0, 0, width, height).data;
+  let minX = width;
+  let minY = height;
+  let maxX = 0;
+  let maxY = 0;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (data[(y * width + x) * 4 + 3] > 10) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX <= minX) return source.toDataURL("image/png");
+  const cropW = maxX - minX + 1;
+  const cropH = maxY - minY + 1;
+  const cropped = document.createElement("canvas");
+  cropped.width = cropW;
+  cropped.height = cropH;
+  cropped.getContext("2d")!.drawImage(source, minX, minY, cropW, cropH, 0, 0, cropW, cropH);
+  return cropped.toDataURL("image/png");
+}
+
 export function loadLogoBase64(): Promise<string> {
   if (_logoCache) return Promise.resolve(_logoCache);
   return new Promise((resolve) => {
@@ -129,7 +169,11 @@ export function loadLogoBase64(): Promise<string> {
       canvas.height = img.height;
       const ctx = canvas.getContext("2d")!;
       ctx.drawImage(img, 0, 0);
-      _logoCache = canvas.toDataURL("image/png");
+      try {
+        _logoCache = trimCanvasTransparentEdges(canvas);
+      } catch {
+        _logoCache = canvas.toDataURL("image/png");
+      }
       resolve(_logoCache);
     };
     img.onerror = () => resolve("");
@@ -178,46 +222,52 @@ export async function initPdf(options?: { orientation?: "portrait" | "landscape"
 // HEADER — Logo (top-left) + Orange rounded QR tab (top-right)
 // Matches sample design: tab hangs from top edge with rounded bottom
 // ═══════════════════════════════════════════════════════════════
+/** Extra space from page top edge to logo (mm) */
+const HEADER_TOP_GAP = 10;
+const QR_TAB_HEIGHT = 26;
+
 export async function addPdfHeader(
   doc: jsPDF, cfg: PdfCompanyConfig, logoBase64: string, qrDataUrl?: string
 ): Promise<number> {
   const pw = getPageWidth(doc);
+  let contentStartY = 44;
 
-  // ── Logo — top left, shifted down & right for breathing room ──
+  // ── Logo — same left edge as BILL TO (MARGIN) ──
   if (logoBase64) {
     try {
       const imageProps = doc.getImageProperties(logoBase64);
       const aspectRatio = imageProps.width / Math.max(imageProps.height, 1);
-      const logoW = Math.min(72, 50 * aspectRatio);
+      const logoW = Math.min(68, 48 * aspectRatio);
       const logoH = logoW / Math.max(aspectRatio, 0.01);
-      doc.addImage(logoBase64, "PNG", 6, 6, logoW, logoH);
+      const logoX = MARGIN;
+      const logoY = HEADER_TOP_GAP;
+      doc.addImage(logoBase64, "PNG", logoX, logoY, logoW, logoH);
+      contentStartY = logoY + logoH + 6;
     } catch { /* skip */ }
   }
 
-  // ── Orange QR tab — top right, hanging from top edge ──
-  // Width ~30mm, height ~42mm, rounded only on bottom (approximated with full rounded rect from y=-6)
-  const tabW = 32;
-  const tabH = 44;
-  const tabX = pw - MARGIN - tabW - 10;
-  const tabY = -8; // extends above page edge so only bottom shows rounded
+  // ── Orange QR tab — compact, +2mm gap from page top (matches logo)
+  const tabW = 22;
+  const tabH = QR_TAB_HEIGHT;
+  const tabX = pw - MARGIN - tabW;
+  const tabY = HEADER_TOP_GAP - 5;
   doc.setFillColor(BRAND_ORANGE.r, BRAND_ORANGE.g, BRAND_ORANGE.b);
-  doc.roundedRect(tabX, tabY, tabW, tabH, 6, 6, "F");
+  doc.roundedRect(tabX, tabY, tabW, tabH, 4, 4, "F");
 
   const drawQrCodeLabel = () => {
     doc.setTextColor(255, 255, 255);
-    doc.setFontSize(10);
+    doc.setFontSize(7);
     doc.setFont("helvetica", "bold");
-    doc.text("QR Code", tabX + tabW / 2, tabY + tabH - 14, { align: "center" });
+    doc.text("QR Code", tabX + tabW / 2, tabY + tabH - 8, { align: "center" });
   };
 
-  // QR code inside tab (sample placeholder text when unavailable)
   if (qrDataUrl) {
     try {
-      const qrSize = 20;
+      const qrSize = 14;
       const qrX = tabX + (tabW - qrSize) / 2;
-      const qrY = tabY + tabH - qrSize - 6;
+      const qrY = tabY + tabH - qrSize - 4;
       doc.setFillColor(255, 255, 255);
-      doc.roundedRect(qrX - 1, qrY - 1, qrSize + 2, qrSize + 2, 1, 1, "F");
+      doc.roundedRect(qrX - 0.5, qrY - 0.5, qrSize + 1, qrSize + 1, 0.8, 0.8, "F");
       doc.addImage(qrDataUrl, "PNG", qrX, qrY, qrSize, qrSize);
     } catch {
       drawQrCodeLabel();
@@ -229,7 +279,7 @@ export async function addPdfHeader(
   doc.setTextColor(0);
   doc.setFontSize(10);
 
-  return 50; // Content starts below header
+  return contentStartY;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -296,49 +346,66 @@ export function addPdfFooter(doc: jsPDF, cfg: PdfCompanyConfig, options?: { show
     };
 
     // Phone numbers - left side with phone icon
-    drawIconCircle(MARGIN + 3, barY + 12, 2.5, "phone");
-    doc.setFontSize(8.5);
+    drawIconCircle(MARGIN + 3, barY + 9, 2.2, "phone");
+    doc.setFontSize(7.5);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(255);
-    doc.text(cfg.phone, MARGIN + 9, barY + 10);
-    doc.text(phone2, MARGIN + 9, barY + 16);
+    doc.text(cfg.phone, MARGIN + 8, barY + 7.5);
+    doc.text(phone2, MARGIN + 8, barY + 12.5);
 
     // Email & website - center with envelope + globe icons
     const centerX = pw / 2 - 5;
-    drawIconCircle(centerX - 5, barY + 8.5, 2, "email");
-    drawIconCircle(centerX - 5, barY + 14.5, 2, "web");
+    drawIconCircle(centerX - 5, barY + 6.5, 1.8, "email");
+    drawIconCircle(centerX - 5, barY + 11.5, 1.8, "web");
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(7.5);
+    doc.setFontSize(7);
     doc.setTextColor(255);
-    doc.text(cfg.email || "manasiktravelhub.info@gmail.com", centerX, barY + 10);
-    doc.text("manasiktravelhub.com", centerX, barY + 16);
+    doc.text(cfg.email || "manasiktravelhub.info@gmail.com", centerX, barY + 7.5);
+    doc.text("manasiktravelhub.com", centerX, barY + 12.5);
 
-    // Thank You — right side (script/cursive via canvas)
+    // Thank You — right side (compact script, matching sample proportions)
+    const thankYouRight = pw - MARGIN - 4;
+    const taglineY = barY + 12.5;
     try {
-      const script = renderScriptTextImage("Thank You", 18, "#FFFFFF");
-      const scriptX = pw - MARGIN - 4 - script.width;
-      doc.addImage(script.dataUrl, "PNG", scriptX, barY + 2, script.width, script.height);
+      const script = renderScriptTextImage("Thank You", 10, "#FFFFFF");
+      const maxW = 28;
+      const maxH = 5.5;
+      let drawW = script.width;
+      let drawH = script.height;
+      if (drawW > maxW) {
+        const r = maxW / drawW;
+        drawW = maxW;
+        drawH = drawH * r;
+      }
+      if (drawH > maxH) {
+        const r = maxH / drawH;
+        drawH = maxH;
+        drawW = drawW * r;
+      }
+      const drawX = thankYouRight - drawW;
+      const drawY = barY + 2.5;
+      doc.addImage(script.dataUrl, "PNG", drawX, drawY, drawW, drawH);
     } catch {
-      doc.setFontSize(16);
+      doc.setFontSize(10);
       doc.setFont("helvetica", "bolditalic");
       doc.setTextColor(255);
-      doc.text("Thank You", pw - MARGIN - 4, barY + 10, { align: "right" });
+      doc.text("Thank You", thankYouRight, barY + 7.5, { align: "right" });
     }
-    doc.setFontSize(6.5);
+    doc.setFontSize(5.5);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(255);
-    doc.text("Stay With MANASIK TRAVEL HUB", pw - MARGIN - 4, barY + 17, { align: "right" });
+    doc.text("Stay With MANASIK TRAVEL HUB", thankYouRight, taglineY, { align: "right" });
 
     // Page numbers
     if (options?.showPageNumbers !== false && totalPages > 1) {
-      doc.setFontSize(6);
+      doc.setFontSize(5.5);
       doc.setFont("helvetica", "normal");
       doc.setTextColor(200);
-      doc.text(`Page ${i} of ${totalPages}`, pw - MARGIN - 4, barY + 22, { align: "right" });
+      doc.text(`Page ${i} of ${totalPages}`, pw - MARGIN - 4, barY + 17, { align: "right" });
     }
 
-    // Address line — full corporate address, centered at bottom of footer bar
-    if (cfg.address) {
+    // Address — single compact line when bar is short (sample has no address in footer)
+    if (cfg.address && barH >= 32) {
       doc.setFontSize(7);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(255);
@@ -468,14 +535,18 @@ export function addBillToAndMeta(
 ): number {
   const pw = getPageWidth(doc);
   const leftX = MARGIN;
-  const rightColX = pw / 2 + 8;
+  const rightEdge = pw - MARGIN;
   const title = (options?.title || "INVOICE").toUpperCase();
 
-  // ── RIGHT: Large orange title (top of right column) ──
+  // ── RIGHT: Large orange title — clear gap below QR tab
+  const qrTabBottom = HEADER_TOP_GAP - 5 + QR_TAB_HEIGHT;
+  const titleY = Math.max(y + 6, qrTabBottom + 15);
   doc.setFontSize(38);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(BRAND_ORANGE.r, BRAND_ORANGE.g, BRAND_ORANGE.b);
-  doc.text(title, pw - MARGIN, y + 6, { align: "right" });
+  doc.text(title, rightEdge, titleY, { align: "right" });
+  const titleWidth = doc.getTextWidth(title);
+  const metaLeftX = rightEdge - titleWidth;
 
   // ── LEFT: BILL TO heading ──
   doc.setFontSize(13);
@@ -511,8 +582,8 @@ export function addBillToAndMeta(
     fieldY += 6.2;
   });
 
-  // ── RIGHT: Metadata block, sits below the title ──
-  let metaY = y + 18;
+  // ── RIGHT: Metadata — same width & right edge as INVOICE title above
+  let metaY = titleY + 12;
   doc.setFontSize(10);
   doc.setTextColor(DARK.r, DARK.g, DARK.b);
 
@@ -521,14 +592,15 @@ export function addBillToAndMeta(
     const w = doc.getTextWidth(f.label);
     if (w > maxMetaLabelW) maxMetaLabelW = w;
   });
-  const metaColonX = rightColX + maxMetaLabelW + 3;
+  const metaColonX = metaLeftX + maxMetaLabelW + 2;
 
   metaFields.forEach((f) => {
     const isBold = /travel\s*date/i.test(f.label);
     doc.setFont("helvetica", isBold ? "bold" : "normal");
-    doc.text(f.label, rightColX, metaY);
+    doc.text(f.label, metaLeftX, metaY);
     doc.text(":", metaColonX, metaY);
-    doc.text(f.value, metaColonX + 3, metaY);
+    const safeVal = sanitizeForLatin(f.value || "N/A") || "N/A";
+    doc.text(safeVal, rightEdge, metaY, { align: "right" });
     metaY += 6.2;
   });
 
