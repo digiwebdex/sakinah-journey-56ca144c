@@ -306,22 +306,57 @@ app.get('/api/public/payment-methods', async (_req, res) => {
 
     const safeMethods = methods
       .filter((method) => method && method.enabled)
-      .map((method) => ({
-        id: method.id,
-        name: method.name,
-        name_bn: method.name_bn,
-        icon: method.icon,
-        category: method.category,
-        enabled: Boolean(method.enabled),
-        account_name: method.account_name || '',
-        account_number: method.account_number || '',
-        instructions: method.instructions || '',
-        instructions_bn: method.instructions_bn || '',
-        charge_percent: Number(method.charge_percent || 0),
-        min_amount: Number(method.min_amount || 0),
-        max_amount: Number(method.max_amount || 0),
-        is_sandbox: Boolean(method.is_sandbox),
-      }));
+      .map((method) => {
+        const base = {
+          id: method.id,
+          name: method.name,
+          name_bn: method.name_bn,
+          icon: method.icon,
+          category: method.category,
+          enabled: Boolean(method.enabled),
+          account_name: method.account_name || '',
+          account_number: method.account_number || '',
+          instructions: method.instructions || '',
+          instructions_bn: method.instructions_bn || '',
+          charge_percent: Number(method.charge_percent || 0),
+          min_amount: Number(method.min_amount || 0),
+          max_amount: Number(method.max_amount || 0),
+          is_sandbox: Boolean(method.is_sandbox),
+        };
+
+        if (method.category === 'bank') {
+          let bankAccounts = method.bank_accounts;
+          if (!Array.isArray(bankAccounts) || bankAccounts.length === 0) {
+            if (method.account_name || method.account_number) {
+              bankAccounts = [{
+                bank_name: '',
+                account_name: method.account_name || '',
+                account_number: method.account_number || '',
+                routing_number: '',
+                branch: '',
+                swift_code: '',
+              }];
+            } else {
+              bankAccounts = [];
+            }
+          }
+          return {
+            ...base,
+            bank_accounts: bankAccounts.map((a) => ({
+              bank_name: a.bank_name || '',
+              account_name: a.account_name || '',
+              account_number: a.account_number || '',
+              routing_number: a.routing_number || '',
+              branch: a.branch || '',
+              swift_code: a.swift_code || '',
+            })),
+            account_name: bankAccounts[0]?.account_name || base.account_name,
+            account_number: bankAccounts[0]?.account_number || base.account_number,
+          };
+        }
+
+        return base;
+      });
 
     return res.json(safeMethods);
   } catch (err) {

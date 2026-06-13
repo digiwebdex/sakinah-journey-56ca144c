@@ -10,6 +10,8 @@ import bkashLogo from "@/assets/payment/bkash.png";
 import nagadLogo from "@/assets/payment/nagad.png";
 import bankTransferLogo from "@/assets/payment/bank-transfer.png";
 import sslcommerzLogo from "@/assets/payment/sslcommerz.png";
+import BankAccountDetails, { BankAccountListSummary } from "@/components/payment/BankAccountDetails";
+import { normalizeBankAccounts } from "@/lib/paymentMethods";
 
 const PAYMENT_LOGOS: Record<string, string> = {
   bkash: bkashLogo,
@@ -144,12 +146,18 @@ const Booking = () => {
         if (method.enabled === undefined) return true;
         return method.enabled === true || method.enabled === "true" || method.enabled === 1 || method.enabled === "1";
       })
-      .map((method: any, index: number) => ({
-        ...method,
-        id: method.id || `payment-${index}`,
-        enabled: Boolean(method.enabled),
-        charge_percent: Number(method.charge_percent || 0),
-      }));
+      .map((method: any, index: number) => {
+        const normalized = {
+          ...method,
+          id: method.id || `payment-${index}`,
+          enabled: Boolean(method.enabled),
+          charge_percent: Number(method.charge_percent || 0),
+        };
+        if (normalized.category === "bank") {
+          normalized.bank_accounts = normalizeBankAccounts(normalized);
+        }
+        return normalized;
+      });
   };
 
   useEffect(() => {
@@ -512,13 +520,16 @@ const Booking = () => {
                                     <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${categoryColor}`}>{categoryLabel}</span>
                                   )}
                                 </div>
-                                {method.account_number && (
+                                {method.category === "bank" && method.bank_accounts?.length ? (
+                                  <BankAccountListSummary accounts={method.bank_accounts} />
+                                ) : method.account_number ? (
                                   <p className="text-xs font-mono text-muted-foreground">{method.account_number}</p>
-                                )}
-                                {!method.account_number && (method.instructions_bn || method.instructions) && (
-                                  <p className="text-xs text-muted-foreground truncate">
-                                    {method.instructions_bn || method.instructions}
-                                  </p>
+                                ) : (
+                                  (method.instructions_bn || method.instructions) && (
+                                    <p className="text-xs text-muted-foreground truncate">
+                                      {method.instructions_bn || method.instructions}
+                                    </p>
+                                  )
                                 )}
                               </div>
                               {isSelected && (
@@ -535,17 +546,23 @@ const Booking = () => {
                         return m ? (
                           <div className="mt-4 p-4 bg-secondary/50 rounded-lg space-y-2">
                             <p className="text-sm font-semibold text-foreground">{m.name_bn || m.name} — {t("booking.paymentInfo") || "পেমেন্ট তথ্য"}</p>
-                            {m.account_number && (
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs text-muted-foreground">{t("booking.accountNumber") || "অ্যাকাউন্ট নম্বর"}:</span>
-                                <span className="font-mono font-bold text-foreground text-base tracking-wide">{m.account_number}</span>
-                              </div>
-                            )}
-                            {m.account_name && (
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs text-muted-foreground">{t("booking.accountName") || "অ্যাকাউন্ট নাম"}:</span>
-                                <span className="font-semibold text-foreground">{m.account_name}</span>
-                              </div>
+                            {m.category === "bank" && m.bank_accounts?.length ? (
+                              <BankAccountDetails accounts={m.bank_accounts} />
+                            ) : (
+                              <>
+                                {m.account_number && (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs text-muted-foreground">{t("booking.accountNumber") || "অ্যাকাউন্ট নম্বর"}:</span>
+                                    <span className="font-mono font-bold text-foreground text-base tracking-wide">{m.account_number}</span>
+                                  </div>
+                                )}
+                                {m.account_name && (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs text-muted-foreground">{t("booking.accountName") || "অ্যাকাউন্ট নাম"}:</span>
+                                    <span className="font-semibold text-foreground">{m.account_name}</span>
+                                  </div>
+                                )}
+                              </>
                             )}
                             {m.charge_percent > 0 && (
                               <p className="text-xs text-orange-600">💡 চার্জ: {m.charge_percent}%</p>
