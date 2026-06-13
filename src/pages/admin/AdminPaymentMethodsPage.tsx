@@ -10,8 +10,9 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Smartphone, Banknote, CreditCard, Building2, Globe, Truck, Save, RefreshCw, Shield
+  Smartphone, Banknote, CreditCard, Building2, Globe, Truck, Save, RefreshCw, Shield, Plus, Trash2
 } from "lucide-react";
+import { BankAccount, emptyBankAccount, normalizeBankAccounts } from "@/lib/paymentMethods";
 
 interface PaymentMethod {
   id: string;
@@ -22,6 +23,7 @@ interface PaymentMethod {
   enabled: boolean;
   account_name: string;
   account_number: string;
+  bank_accounts?: BankAccount[];
   merchant_id: string;
   instructions: string;
   instructions_bn: string;
@@ -45,7 +47,7 @@ const DEFAULT_METHODS: PaymentMethod[] = [
   { id: "visa", name: "Visa Card", name_bn: "ভিসা কার্ড", icon: "visa", category: "card", enabled: false, account_name: "", account_number: "", merchant_id: "", instructions: "Pay with your Visa debit/credit card", instructions_bn: "আপনার ভিসা ডেবিট/ক্রেডিট কার্ডে পেমেন্ট করুন", charge_percent: 2.5, min_amount: 100, max_amount: 500000, api_key: "", api_secret: "", store_id: "", store_password: "", is_sandbox: false },
   { id: "mastercard", name: "Mastercard", name_bn: "মাস্টারকার্ড", icon: "mastercard", category: "card", enabled: false, account_name: "", account_number: "", merchant_id: "", instructions: "Pay with your Mastercard", instructions_bn: "আপনার মাস্টারকার্ডে পেমেন্ট করুন", charge_percent: 2.5, min_amount: 100, max_amount: 500000, api_key: "", api_secret: "", store_id: "", store_password: "", is_sandbox: false },
   // Bank
-  { id: "bank_transfer", name: "Bank Transfer (EFTN/NPSB)", name_bn: "ব্যাংক ট্রান্সফার", icon: "bank", category: "bank", enabled: true, account_name: "", account_number: "", merchant_id: "", instructions: "Transfer to our bank account. Share screenshot as receipt.", instructions_bn: "আমাদের ব্যাংক একাউন্টে ট্রান্সফার করুন। রসিদ হিসেবে স্ক্রিনশট শেয়ার করুন।", charge_percent: 0, min_amount: 500, max_amount: 5000000, api_key: "", api_secret: "", store_id: "", store_password: "", is_sandbox: false },
+  { id: "bank_transfer", name: "Bank Transfer (EFTN/NPSB)", name_bn: "ব্যাংক ট্রান্সফার", icon: "bank", category: "bank", enabled: true, account_name: "", account_number: "", bank_accounts: [emptyBankAccount()], merchant_id: "", instructions: "Transfer to our bank account. Share screenshot as receipt.", instructions_bn: "আমাদের ব্যাংক একাউন্টে ট্রান্সফার করুন। রসিদ হিসেবে স্ক্রিনশট শেয়ার করুন।", charge_percent: 0, min_amount: 500, max_amount: 5000000, api_key: "", api_secret: "", store_id: "", store_password: "", is_sandbox: false },
   // Gateway
   { id: "sslcommerz", name: "SSLCommerz", name_bn: "এসএসএল কমার্জ", icon: "sslcommerz", category: "gateway", enabled: false, account_name: "", account_number: "", merchant_id: "", instructions: "Pay securely via SSLCommerz gateway", instructions_bn: "SSLCommerz গেটওয়ে দিয়ে নিরাপদে পেমেন্ট করুন", charge_percent: 2.0, min_amount: 10, max_amount: 500000, api_key: "", api_secret: "", store_id: "", store_password: "", is_sandbox: true },
   { id: "aamarpay", name: "aamarPay", name_bn: "আমারপে", icon: "aamarpay", category: "gateway", enabled: false, account_name: "", account_number: "", merchant_id: "", instructions: "Pay via aamarPay gateway", instructions_bn: "আমারপে গেটওয়ে দিয়ে পেমেন্ট করুন", charge_percent: 2.0, min_amount: 10, max_amount: 500000, api_key: "", api_secret: "", store_id: "", store_password: "", is_sandbox: true },
@@ -82,7 +84,11 @@ export default function AdminPaymentMethodsPage() {
       // Merge saved with defaults (in case new methods were added)
       const merged = DEFAULT_METHODS.map((def) => {
         const found = saved.find((s: PaymentMethod) => s.id === def.id);
-        return found ? { ...def, ...found } : def;
+        const method = found ? { ...def, ...found } : def;
+        if (method.category === "bank") {
+          return { ...method, bank_accounts: normalizeBankAccounts(method) };
+        }
+        return method;
       });
       setMethods(merged);
     }
@@ -97,7 +103,17 @@ export default function AdminPaymentMethodsPage() {
       .eq("setting_key", "payment_methods")
       .maybeSingle();
 
-    const payload = { setting_key: "payment_methods", setting_value: methods as unknown as Record<string, unknown> };
+    const payloadMethods = methods.map((m) => {
+      if (m.category !== "bank" || !m.bank_accounts?.length) return m;
+      const first = m.bank_accounts[0];
+      return {
+        ...m,
+        account_name: first.account_name,
+        account_number: first.account_number,
+      };
+    });
+
+    const payload = { setting_key: "payment_methods", setting_value: payloadMethods as unknown as Record<string, unknown> };
 
     if (existing) {
       await supabase.from("company_settings").update(payload).eq("id", existing.id);
@@ -110,6 +126,38 @@ export default function AdminPaymentMethodsPage() {
 
   const updateMethod = (id: string, updates: Partial<PaymentMethod>) => {
     setMethods((prev) => prev.map((m) => (m.id === id ? { ...m, ...updates } : m)));
+  };
+
+  const updateBankAccount = (methodId: string, index: number, updates: Partial<BankAccount>) => {
+    setMethods((prev) =>
+      prev.map((m) => {
+        if (m.id !== methodId) return m;
+        const accounts = [...(m.bank_accounts || [emptyBankAccount()])];
+        accounts[index] = { ...accounts[index], ...updates };
+        return { ...m, bank_accounts: accounts };
+      })
+    );
+  };
+
+  const addBankAccount = (methodId: string) => {
+    setMethods((prev) =>
+      prev.map((m) =>
+        m.id === methodId
+          ? { ...m, bank_accounts: [...(m.bank_accounts || []), emptyBankAccount()] }
+          : m
+      )
+    );
+  };
+
+  const removeBankAccount = (methodId: string, index: number) => {
+    setMethods((prev) =>
+      prev.map((m) => {
+        if (m.id !== methodId) return m;
+        const accounts = m.bank_accounts || [emptyBankAccount()];
+        if (accounts.length <= 1) return m;
+        return { ...m, bank_accounts: accounts.filter((_, i) => i !== index) };
+      })
+    );
   };
 
   const enabledCount = methods.filter((m) => m.enabled).length;
@@ -205,38 +253,134 @@ export default function AdminPaymentMethodsPage() {
 
                   {method.enabled && (
                     <CardContent className="pt-0 space-y-4">
-                      {/* Account Details */}
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div>
-                          <Label className="text-xs">Account Name</Label>
-                          <Input
-                            value={method.account_name}
-                            onChange={(e) => updateMethod(method.id, { account_name: e.target.value })}
-                            placeholder="e.g. Manasik Travel Hub"
-                            className="text-sm h-9"
-                          />
+                      {/* Bank account details (multiple) */}
+                      {cat === "bank" ? (
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs font-medium text-muted-foreground">Bank Accounts</p>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => addBankAccount(method.id)}
+                              className="h-8 text-xs"
+                            >
+                              <Plus className="h-3.5 w-3.5 mr-1" />
+                              Add Bank Account
+                            </Button>
+                          </div>
+                          {(method.bank_accounts || [emptyBankAccount()]).map((account, idx) => (
+                            <div key={idx} className="border rounded-lg p-4 space-y-3 bg-background">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-semibold text-muted-foreground">
+                                  Account {idx + 1}
+                                </span>
+                                {(method.bank_accounts?.length || 1) > 1 && (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => removeBankAccount(method.id, idx)}
+                                    className="h-7 text-xs text-destructive hover:text-destructive"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5 mr-1" />
+                                    Remove
+                                  </Button>
+                                )}
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                <div>
+                                  <Label className="text-xs">Bank Name</Label>
+                                  <Input
+                                    value={account.bank_name}
+                                    onChange={(e) => updateBankAccount(method.id, idx, { bank_name: e.target.value })}
+                                    placeholder="e.g. Shahjalal Islami Bank"
+                                    className="text-sm h-9"
+                                  />
+                                </div>
+                                <div>
+                                  <Label className="text-xs">Account Name</Label>
+                                  <Input
+                                    value={account.account_name}
+                                    onChange={(e) => updateBankAccount(method.id, idx, { account_name: e.target.value })}
+                                    placeholder="e.g. Manasik Travel Hub"
+                                    className="text-sm h-9"
+                                  />
+                                </div>
+                                <div>
+                                  <Label className="text-xs">Account Number</Label>
+                                  <Input
+                                    value={account.account_number}
+                                    onChange={(e) => updateBankAccount(method.id, idx, { account_number: e.target.value })}
+                                    placeholder="Account number"
+                                    className="text-sm h-9"
+                                  />
+                                </div>
+                                <div>
+                                  <Label className="text-xs">Routing Number</Label>
+                                  <Input
+                                    value={account.routing_number}
+                                    onChange={(e) => updateBankAccount(method.id, idx, { routing_number: e.target.value })}
+                                    placeholder="Routing number"
+                                    className="text-sm h-9"
+                                  />
+                                </div>
+                                <div>
+                                  <Label className="text-xs">Branch</Label>
+                                  <Input
+                                    value={account.branch}
+                                    onChange={(e) => updateBankAccount(method.id, idx, { branch: e.target.value })}
+                                    placeholder="Branch name"
+                                    className="text-sm h-9"
+                                  />
+                                </div>
+                                <div>
+                                  <Label className="text-xs">Swift Code</Label>
+                                  <Input
+                                    value={account.swift_code}
+                                    onChange={(e) => updateBankAccount(method.id, idx, { swift_code: e.target.value })}
+                                    placeholder="Optional"
+                                    className="text-sm h-9"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                        <div>
-                          <Label className="text-xs">
-                            {cat === "mfs" ? "Mobile Number" : cat === "bank" ? "Account Number" : "Account/Merchant ID"}
-                          </Label>
-                          <Input
-                            value={method.account_number}
-                            onChange={(e) => updateMethod(method.id, { account_number: e.target.value })}
-                            placeholder={cat === "mfs" ? "01XXXXXXXXX" : "Account number"}
-                            className="text-sm h-9"
-                          />
+                      ) : (
+                        /* Account Details (non-bank) */
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div>
+                            <Label className="text-xs">Account Name</Label>
+                            <Input
+                              value={method.account_name}
+                              onChange={(e) => updateMethod(method.id, { account_name: e.target.value })}
+                              placeholder="e.g. Manasik Travel Hub"
+                              className="text-sm h-9"
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs">
+                              {cat === "mfs" ? "Mobile Number" : "Account/Merchant ID"}
+                            </Label>
+                            <Input
+                              value={method.account_number}
+                              onChange={(e) => updateMethod(method.id, { account_number: e.target.value })}
+                              placeholder={cat === "mfs" ? "01XXXXXXXXX" : "Account number"}
+                              className="text-sm h-9"
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs">Merchant ID</Label>
+                            <Input
+                              value={method.merchant_id}
+                              onChange={(e) => updateMethod(method.id, { merchant_id: e.target.value })}
+                              placeholder="Optional"
+                              className="text-sm h-9"
+                            />
+                          </div>
                         </div>
-                        <div>
-                          <Label className="text-xs">Merchant ID</Label>
-                          <Input
-                            value={method.merchant_id}
-                            onChange={(e) => updateMethod(method.id, { merchant_id: e.target.value })}
-                            placeholder="Optional"
-                            className="text-sm h-9"
-                          />
-                        </div>
-                      </div>
+                      )}
 
                       {/* Fee & Limits */}
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

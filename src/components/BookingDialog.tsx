@@ -8,6 +8,8 @@ import bkashLogo from "@/assets/payment/bkash.png";
 import nagadLogo from "@/assets/payment/nagad.png";
 import bankTransferLogo from "@/assets/payment/bank-transfer.png";
 import sslcommerzLogo from "@/assets/payment/sslcommerz.png";
+import BankAccountDetails, { BankAccountListSummary } from "@/components/payment/BankAccountDetails";
+import { normalizeBankAccounts } from "@/lib/paymentMethods";
 import BookingStepIndicator from "@/components/booking/BookingStepIndicator";
 import PersonalDetailsStep, { type PersonalInfo } from "@/components/booking/PersonalDetailsStep";
 import DocumentUploadStep, { type UploadedDoc } from "@/components/booking/DocumentUploadStep";
@@ -80,7 +82,13 @@ const BookingDialog = ({ open, onOpenChange, packageId }: BookingDialogProps) =>
     }
     if (typeof methods === "string") { try { methods = JSON.parse(methods); } catch { return []; } }
     if (!Array.isArray(methods)) return [];
-    return methods.filter((m: any) => !m || m.enabled === undefined || m.enabled === true || m.enabled === "true" || m.enabled === 1 || m.enabled === "1").map((m: any, i: number) => ({ ...m, id: m.id || `payment-${i}`, enabled: Boolean(m.enabled), charge_percent: Number(m.charge_percent || 0) }));
+    return methods.filter((m: any) => !m || m.enabled === undefined || m.enabled === true || m.enabled === "true" || m.enabled === 1 || m.enabled === "1").map((m: any, i: number) => {
+      const normalized = { ...m, id: m.id || `payment-${i}`, enabled: Boolean(m.enabled), charge_percent: Number(m.charge_percent || 0) };
+      if (normalized.category === "bank") {
+        normalized.bank_accounts = normalizeBankAccounts(normalized);
+      }
+      return normalized;
+    });
   };
 
   useEffect(() => {
@@ -323,8 +331,15 @@ const BookingDialog = ({ open, onOpenChange, packageId }: BookingDialogProps) =>
                                   <span className="font-semibold text-foreground">{method.name_bn || method.name}</span>
                                   {categoryLabel && <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${categoryColor}`}>{categoryLabel}</span>}
                                 </div>
-                                {method.account_number && <p className="text-xs font-mono text-muted-foreground">{method.account_number}</p>}
-                                {!method.account_number && (method.instructions_bn || method.instructions) && <p className="text-xs text-muted-foreground truncate">{method.instructions_bn || method.instructions}</p>}
+                                {method.category === "bank" && method.bank_accounts?.length ? (
+                                  <BankAccountListSummary accounts={method.bank_accounts} />
+                                ) : method.account_number ? (
+                                  <p className="text-xs font-mono text-muted-foreground">{method.account_number}</p>
+                                ) : (
+                                  (method.instructions_bn || method.instructions) && (
+                                    <p className="text-xs text-muted-foreground truncate">{method.instructions_bn || method.instructions}</p>
+                                  )
+                                )}
                               </div>
                               {isSelected && <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center shrink-0"><Check className="h-3.5 w-3.5 text-primary-foreground" /></div>}
                             </button>
@@ -336,8 +351,14 @@ const BookingDialog = ({ open, onOpenChange, packageId }: BookingDialogProps) =>
                         return m ? (
                           <div className="mt-4 p-4 bg-secondary/50 rounded-lg space-y-2">
                             <p className="text-sm font-semibold text-foreground">{m.name_bn || m.name} — {t("booking.paymentInfo") || "পেমেন্ট তথ্য"}</p>
-                            {m.account_number && <div className="flex items-center gap-2"><span className="text-xs text-muted-foreground">{t("booking.accountNumber") || "অ্যাকাউন্ট নম্বর"}:</span><span className="font-mono font-bold text-foreground text-base tracking-wide">{m.account_number}</span></div>}
-                            {m.account_name && <div className="flex items-center gap-2"><span className="text-xs text-muted-foreground">{t("booking.accountName") || "অ্যাকাউন্ট নাম"}:</span><span className="font-semibold text-foreground">{m.account_name}</span></div>}
+                            {m.category === "bank" && m.bank_accounts?.length ? (
+                              <BankAccountDetails accounts={m.bank_accounts} />
+                            ) : (
+                              <>
+                                {m.account_number && <div className="flex items-center gap-2"><span className="text-xs text-muted-foreground">{t("booking.accountNumber") || "অ্যাকাউন্ট নম্বর"}:</span><span className="font-mono font-bold text-foreground text-base tracking-wide">{m.account_number}</span></div>}
+                                {m.account_name && <div className="flex items-center gap-2"><span className="text-xs text-muted-foreground">{t("booking.accountName") || "অ্যাকাউন্ট নাম"}:</span><span className="font-semibold text-foreground">{m.account_name}</span></div>}
+                              </>
+                            )}
                             {m.charge_percent > 0 && <p className="text-xs text-orange-600">💡 চার্জ: {m.charge_percent}%</p>}
                             {(m.instructions_bn || m.instructions) && <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{m.instructions_bn || m.instructions}</p>}
                           </div>
