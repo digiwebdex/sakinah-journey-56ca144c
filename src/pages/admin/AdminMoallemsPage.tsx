@@ -19,6 +19,7 @@ import AdminActionMenu, { ActionItem } from "@/components/admin/AdminActionMenu"
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Pencil, Trash2, Eye, Search, Users, ChevronLeft, ChevronRight, FileDown, FileSpreadsheet } from "lucide-react";
 import { exportPDF, exportExcel } from "@/lib/reportExport";
+import { generateMoallemPdf, getCompanyInfoForPdf } from "@/lib/entityPdfGenerator";
 import { normalizePhone, getPhoneError, handlePhoneChange } from "@/lib/phoneValidation";
 import { formatBDT } from "@/lib/utils";
 
@@ -127,11 +128,77 @@ export default function AdminMoallemsPage() {
 
   useEffect(() => { setPage(1); }, [search]);
 
+  const downloadMoallemPdf = async (m: Moallem) => {
+    try {
+      const company = await getCompanyInfoForPdf();
+      const [bRes, mpRes, cpRes, itemsRes] = await Promise.all([
+        supabase.from("bookings").select("tracking_id, guest_name, total_amount, paid_amount, due_amount, status, created_at, num_travelers, total_commission, commission_paid, commission_due, packages(name)").eq("moallem_id", m.id).order("created_at", { ascending: false }),
+        supabase.from("moallem_payments").select("*").eq("moallem_id", m.id).order("date", { ascending: false }),
+        (supabase as any).from("moallem_commission_payments").select("*").eq("moallem_id", m.id).order("date", { ascending: false }),
+        (supabase as any).from("moallem_items").select("*").eq("moallem_id", m.id),
+      ]);
+      const bookings = bRes.data || [];
+      const moallemPayments = mpRes.data || [];
+      const commissionPayments = cpRes.data || [];
+      const items = itemsRes.data || [];
+      const totalItemsBilled = items.reduce((s: number, i: any) => s + Number(i.total_amount || 0), 0);
+      const totalSelling = Number(m.contracted_amount || 0);
+      const effectiveTotal = totalItemsBilled > 0 ? totalItemsBilled : totalSelling;
+      const totalPaid = moallemPayments.reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
+      const totalDue = Math.max(0, effectiveTotal - totalPaid);
+
+      await generateMoallemPdf({
+        name: m.name,
+        phone: m.phone,
+        address: m.address,
+        nid_number: m.nid_number,
+        contract_date: m.contract_date,
+        status: m.status,
+        notes: m.notes,
+        bookings: bookings.map((b: any) => ({
+          tracking_id: b.tracking_id,
+          guest_name: b.guest_name || "—",
+          package_name: b.packages?.name || "—",
+          total: Number(b.total_amount),
+          paid: Number(b.paid_amount),
+          due: Number(b.due_amount || 0),
+          status: b.status,
+          date: b.created_at,
+        })),
+        moallemPayments: moallemPayments.map((p: any) => ({
+          amount: Number(p.amount),
+          date: p.date,
+          method: p.payment_method || "cash",
+          notes: p.notes,
+        })),
+        commissionPayments: commissionPayments.map((p: any) => ({
+          amount: Number(p.amount),
+          date: p.date,
+          method: p.payment_method || "cash",
+          notes: p.notes,
+        })),
+        summary: {
+          totalBookings: bookings.length,
+          totalTravelers: bookings.reduce((s: number, b: any) => s + Number(b.num_travelers || 0), 0),
+          totalAmount: effectiveTotal,
+          totalPaid,
+          totalDue,
+          totalDeposit: totalPaid,
+          totalCommission: bookings.reduce((s: number, b: any) => s + Number(b.total_commission || 0), 0),
+          commissionPaid: bookings.reduce((s: number, b: any) => s + Number(b.commission_paid || 0), 0),
+          commissionDue: bookings.reduce((s: number, b: any) => s + Number(b.commission_due || 0), 0),
+        },
+      }, company);
+      toast({ title: "PDF downloaded successfully" });
+    } catch {
+      toast({ title: "Failed to generate PDF", variant: "destructive" });
+    }
+  };
+
   const getActions = (m: Moallem): ActionItem[] => {
-    const stats = moallemStats[m.id] || { hajji: 0, received: 0, due: 0 };
     return [
       { label: "View", icon: <Eye className="h-3.5 w-3.5" />, onClick: () => navigate(`/admin/moallems/${m.id}`) },
-      { label: "PDF", icon: <FileDown className="h-3.5 w-3.5" />, onClick: () => exportPDF({ title: `Moallem - ${m.name}`, columns: ["Name", "Phone", "Pilgrim Count", "Contract Amount", "Total Paid", "Total Due"], rows: [[m.name, m.phone || "—", m.contracted_hajji || 0, m.contracted_amount || 0, stats.received, stats.due]], summary: [`Total Paid: BDT ${stats.received.toLocaleString("en-IN")}`, `Total Due: BDT ${stats.due.toLocaleString("en-IN")}`] }) },
+      { label: "PDF", icon: <FileDown className="h-3.5 w-3.5" />, onClick: () => downloadMoallemPdf(m) },
       { label: "Edit", icon: <Pencil className="h-3.5 w-3.5" />, onClick: () => startEdit(m), variant: "warning", hidden: isViewer },
       { label: "Delete", icon: <Trash2 className="h-3.5 w-3.5" />, onClick: () => setDeleteId(m.id), variant: "destructive", hidden: isViewer, separator: true },
     ];

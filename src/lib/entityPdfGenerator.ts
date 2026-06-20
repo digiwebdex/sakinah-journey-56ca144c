@@ -1,18 +1,23 @@
 /**
  * entityPdfGenerator.ts — Moallem, Supplier, Customer Profile PDFs
- * Uses unified pdfCore design system.
+ * Layout matches booking invoice (addBillToAndMeta, invoice tables, financial summary).
  */
 import { CompanyInfo } from "./invoiceGenerator";
 import {
-  initPdf, addPdfHeader, addPdfFooter, addTitleBlock, addSummaryCards,
-  addSectionTitle, addInfoBox, addTable, addRawTable, addSignatureBlock,
-  addWatermark, getWatermarkStatus, addTotalsBar, buildFileName,
-  fmtDate, fmtBDT, fmtAmount,
-  DARK, ORANGE, LIGHT_BG,
-  type SummaryCard, type InfoField,
+  initPdf, addPdfHeader, addPdfFooter, addSectionTitle, addRawTable,
+  addSignatureBlock, addBillToAndMeta, addFinancialSummary, addFinancialBox,
+  getWatermarkStatus, ensurePageSpace, buildFileName, INVOICE_TABLE,
+  fmtDate, fmtAmount,
 } from "./pdfCore";
 import { getPdfCompanyConfig } from "./pdfCompanyConfig";
-import { formatBDT } from "@/lib/utils";
+import { registerBengaliFont } from "./pdfFontLoader";
+import { addPaymentWatermark } from "./pdfQrCode";
+
+const reportDate = () => fmtDate(new Date().toISOString());
+
+function capitalizeStatus(status: string) {
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
 
 // ── Moallem Profile PDF ──
 export interface MoallemPdfData {
@@ -31,77 +36,96 @@ export interface MoallemPdfData {
 
 export async function generateMoallemPdf(data: MoallemPdfData, _company: CompanyInfo) {
   const { doc, logoBase64, sig, qrDataUrl, cfg } = await initPdf();
+  await registerBengaliFont(doc);
 
   let y = await addPdfHeader(doc, cfg, logoBase64, qrDataUrl);
+  addPaymentWatermark(doc, getWatermarkStatus(data.summary.totalPaid, data.summary.totalDue));
 
-  // Watermark
-  const wmStatus = getWatermarkStatus(data.summary.totalPaid, data.summary.totalDue);
-  addWatermark(doc, wmStatus);
+  y = addBillToAndMeta(
+    doc, y,
+    [
+      { label: "Name", value: data.name },
+      { label: "Phone", value: data.phone || "N/A" },
+      { label: "NID", value: data.nid_number || "N/A" },
+      { label: "Address", value: data.address || "N/A" },
+      { label: "Note", value: data.notes?.trim() || "N/A" },
+    ],
+    [
+      { label: "Report Date", value: reportDate() },
+      { label: "Status", value: capitalizeStatus(data.status) },
+      { label: "Total Bookings", value: String(data.summary.totalBookings) },
+    ],
+    { title: "MOALLEM REPORT", leftHeading: "DETAILS" }
+  );
 
-  // Title
-  y = addTitleBlock(doc, y, "Moallem Profile Report", data.status);
-
-  // Info box
-  const fields: InfoField[] = [
-    { label: "Name", value: data.name },
-    { label: "Phone", value: data.phone || "N/A" },
-    { label: "NID", value: data.nid_number || "N/A" },
-    { label: "Contract Date", value: fmtDate(data.contract_date) },
-    { label: "Address", value: data.address || "N/A" },
-    { label: "Status", value: data.status },
-  ];
-  y = await addInfoBox(doc, y, fields, "Moallem Details");
-
-  // Summary cards
-  const cards: SummaryCard[] = [
-    { label: "Total Bookings", value: String(data.summary.totalBookings) },
-    { label: "Total Amount", value: fmtBDT(data.summary.totalAmount) },
-    { label: "Paid", value: fmtBDT(data.summary.totalPaid) },
-    { label: "Due", value: fmtBDT(data.summary.totalDue), highlight: data.summary.totalDue > 0 },
-  ];
-  y = addSummaryCards(doc, y, cards);
-
-  // Deposit & Commission summary bar
-  y = addTotalsBar(doc, y, [
-    `Deposit: ${fmtBDT(data.summary.totalDeposit)}`,
-    `Commission: ${fmtBDT(data.summary.totalCommission)}`,
-    `Comm. Paid: ${fmtBDT(data.summary.commissionPaid)}`,
-    `Comm. Due: ${fmtBDT(data.summary.commissionDue)}`,
-  ]);
-
-  // Bookings table
   if (data.bookings.length > 0) {
-    y = addSectionTitle(doc, y, "Bookings");
+    y = addSectionTitle(doc, y, "BOOKINGS");
     y = addRawTable(doc, {
       startY: y,
-      head: ["Tracking ID", "Guest", "Package", "Total", "Paid", "Due", "Status"],
-      body: data.bookings.map(b => [b.tracking_id, b.guest_name, b.package_name, formatBDT(b.total), formatBDT(b.paid), formatBDT(b.due), b.status]),
+      head: ["Tracking ID", "Guest", "Package", "Total (BDT)", "Paid (BDT)", "Due (BDT)", "Status"],
+      body: data.bookings.map(b => [
+        b.tracking_id, b.guest_name, b.package_name,
+        fmtAmount(b.total), fmtAmount(b.paid), fmtAmount(b.due),
+        capitalizeStatus(b.status),
+      ]),
+      columnStyles: {
+        3: { halign: "right" },
+        4: { halign: "right" },
+        5: { halign: "right" },
+        6: { halign: "center", cellWidth: 18 },
+      },
+      ...INVOICE_TABLE,
     });
   }
 
-  // Moallem Payments
   if (data.moallemPayments.length > 0) {
-    y = addSectionTitle(doc, y, "Moallem Payments (Deposits)");
+    y = ensurePageSpace(doc, y, 30);
+    y = addSectionTitle(doc, y, "MOALLEM DEPOSITS");
     y = addRawTable(doc, {
       startY: y,
-      head: ["Amount", "Date", "Method", "Notes"],
-      body: data.moallemPayments.map(p => [formatBDT(p.amount), fmtDate(p.date), p.method, p.notes || "—"]),
+      head: ["#", "Date", "Method", "Amount (BDT)", "Notes"],
+      body: data.moallemPayments.map((p, i) => [
+        String(i + 1), fmtDate(p.date),
+        (p.method || "Manual").charAt(0).toUpperCase() + (p.method || "manual").slice(1),
+        fmtAmount(p.amount), p.notes || "—",
+      ]),
+      columnStyles: { 0: { cellWidth: 12, halign: "center" }, 3: { halign: "right", fontStyle: "bold" } },
+      ...INVOICE_TABLE,
     });
   }
 
-  // Commission Payments
   if (data.commissionPayments.length > 0) {
-    y = addSectionTitle(doc, y, "Commission Payments");
+    y = ensurePageSpace(doc, y, 30);
+    y = addSectionTitle(doc, y, "COMMISSION PAYMENTS");
     y = addRawTable(doc, {
       startY: y,
-      head: ["Amount", "Date", "Method", "Notes"],
-      body: data.commissionPayments.map(p => [formatBDT(p.amount), fmtDate(p.date), p.method, p.notes || "—"]),
+      head: ["#", "Date", "Method", "Amount (BDT)", "Notes"],
+      body: data.commissionPayments.map((p, i) => [
+        String(i + 1), fmtDate(p.date),
+        (p.method || "Manual").charAt(0).toUpperCase() + (p.method || "manual").slice(1),
+        fmtAmount(p.amount), p.notes || "—",
+      ]),
+      columnStyles: { 0: { cellWidth: 12, halign: "center" }, 3: { halign: "right", fontStyle: "bold" } },
+      ...INVOICE_TABLE,
     });
   }
 
-  // Signature & Footer
-  addSignatureBlock(doc, sig, y);
-  addPdfFooter(doc, cfg, { showPageNumbers: true });
+  y = ensurePageSpace(doc, y, 50);
+  y = addFinancialSummary(
+    doc, y,
+    data.summary.totalAmount, 0, data.summary.totalAmount,
+    data.summary.totalPaid, data.summary.totalDue
+  );
+
+  y = addFinancialBox(doc, y, [
+    { label: "Total Deposit", value: `BDT ${fmtAmount(data.summary.totalDeposit)}` },
+    { label: "Total Commission", value: `BDT ${fmtAmount(data.summary.totalCommission)}` },
+    { label: "Commission Paid", value: `BDT ${fmtAmount(data.summary.commissionPaid)}` },
+    { label: "Commission Due", value: `BDT ${fmtAmount(data.summary.commissionDue)}`, bold: true },
+  ], { align: "right", width: 95 });
+
+  y = addSignatureBlock(doc, sig, y);
+  addPdfFooter(doc, cfg);
   doc.save(buildFileName("Moallem", data.name));
 }
 
@@ -123,88 +147,127 @@ export interface SupplierPdfData {
 
 export async function generateSupplierPdf(data: SupplierPdfData, _company: CompanyInfo) {
   const { doc, logoBase64, sig, qrDataUrl, cfg } = await initPdf();
+  await registerBengaliFont(doc);
 
   let y = await addPdfHeader(doc, cfg, logoBase64, qrDataUrl);
-  addWatermark(doc, getWatermarkStatus(data.summary.totalPaid, data.summary.totalDue));
+  addPaymentWatermark(doc, getWatermarkStatus(data.summary.totalPaid, data.summary.totalDue));
 
-  y = addTitleBlock(doc, y, "Supplier Agent Report", data.status);
+  y = addBillToAndMeta(
+    doc, y,
+    [
+      { label: "Name", value: data.agent_name },
+      { label: "Phone", value: data.phone || "N/A" },
+      { label: "Company", value: data.company_name || "N/A" },
+      { label: "Address", value: data.address || "N/A" },
+      { label: "Note", value: data.notes?.trim() || "N/A" },
+    ],
+    [
+      { label: "Report Date", value: reportDate() },
+      { label: "Status", value: capitalizeStatus(data.status) },
+      { label: "Total Bookings", value: String(data.summary.totalBookings) },
+    ],
+    { title: "SUPPLIER REPORT", leftHeading: "DETAILS" }
+  );
 
-  // Info box
-  const fields: InfoField[] = [
-    { label: "Agent Name", value: data.agent_name },
-    { label: "Company", value: data.company_name || "N/A" },
-    { label: "Phone", value: data.phone || "N/A" },
-    { label: "Status", value: data.status },
-    { label: "Address", value: data.address || "N/A" },
-  ];
-  y = await addInfoBox(doc, y, fields, "Supplier Details");
-
-  // Summary cards
-  const cards: SummaryCard[] = [
-    { label: "Contracted Hajji", value: String(data.summary.contractedHajji) },
-    { label: "Total Billed", value: fmtBDT(data.summary.totalBilled) },
-    { label: "Total Paid", value: fmtBDT(data.summary.totalPaid) },
-    { label: "Total Due", value: fmtBDT(data.summary.totalDue), highlight: data.summary.totalDue > 0 },
-  ];
-  y = addSummaryCards(doc, y, cards);
-
-  // Service Items
   if (data.items && data.items.length > 0) {
-    y = addSectionTitle(doc, y, "Service Items");
+    y = addSectionTitle(doc, y, "SERVICE ITEMS");
     const itemsTotal = data.items.reduce((s, i) => s + i.total_amount, 0);
     y = addRawTable(doc, {
       startY: y,
-      head: ["SL", "Description", "Qty", "Unit Price", "Total"],
-      body: [
-        ...data.items.map((item, i) => [String(i + 1), item.description, String(item.quantity), formatBDT(item.unit_price), formatBDT(item.total_amount)]),
-      ],
-      foot: [["", "", "", "Grand Total", formatBDT(itemsTotal)]],
+      head: ["#", "Description", "Qty", "Unit Price (BDT)", "Total (BDT)"],
+      body: data.items.map((item, i) => [
+        String(i + 1), item.description, String(item.quantity),
+        fmtAmount(item.unit_price), fmtAmount(item.total_amount),
+      ]),
+      foot: [["", "", "", "Grand Total", fmtAmount(itemsTotal)]],
+      columnStyles: {
+        0: { cellWidth: 12, halign: "center" },
+        2: { halign: "center", cellWidth: 15 },
+        3: { halign: "right" },
+        4: { halign: "right", fontStyle: "bold" },
+      },
+      ...INVOICE_TABLE,
     });
   }
 
-  // Bookings
   if (data.bookings.length > 0) {
-    y = addSectionTitle(doc, y, "Bookings");
+    y = ensurePageSpace(doc, y, 30);
+    y = addSectionTitle(doc, y, "BOOKINGS");
     y = addRawTable(doc, {
       startY: y,
-      head: ["Tracking ID", "Guest", "Package", "Total", "Cost", "Paid", "Due", "Status"],
-      body: data.bookings.map(b => [b.tracking_id, b.guest_name, b.package_name, formatBDT(b.total), formatBDT(b.cost), formatBDT(b.paid_to_supplier), formatBDT(b.supplier_due), b.status]),
-      fontSize: 6.5,
+      head: ["Tracking ID", "Guest", "Package", "Cost (BDT)", "Paid (BDT)", "Due (BDT)", "Status"],
+      body: data.bookings.map(b => [
+        b.tracking_id, b.guest_name, b.package_name,
+        fmtAmount(b.cost), fmtAmount(b.paid_to_supplier), fmtAmount(b.supplier_due),
+        capitalizeStatus(b.status),
+      ]),
+      columnStyles: {
+        3: { halign: "right" },
+        4: { halign: "right" },
+        5: { halign: "right" },
+        6: { halign: "center", cellWidth: 18 },
+      },
+      fontSize: 8,
+      variant: "invoice",
     });
   }
 
-  // Payments
   if (data.agentPayments.length > 0) {
-    y = addSectionTitle(doc, y, "Payments to Supplier");
+    y = ensurePageSpace(doc, y, 30);
+    y = addSectionTitle(doc, y, "PAYMENT HISTORY");
     y = addRawTable(doc, {
       startY: y,
-      head: ["Category", "Amount", "Date", "Method", "Notes"],
-      body: data.agentPayments.map(p => [p.category || "—", formatBDT(p.amount), fmtDate(p.date), p.method, p.notes || "—"]),
+      head: ["#", "Date", "Category", "Method", "Amount (BDT)", "Notes"],
+      body: data.agentPayments.map((p, i) => [
+        String(i + 1), fmtDate(p.date), p.category || "Payment",
+        (p.method || "Manual").charAt(0).toUpperCase() + (p.method || "manual").slice(1),
+        fmtAmount(p.amount), p.notes || "—",
+      ]),
+      columnStyles: { 0: { cellWidth: 12, halign: "center" }, 4: { halign: "right", fontStyle: "bold" } },
+      ...INVOICE_TABLE,
     });
   }
 
-  // Contracts
   if (data.contracts && data.contracts.length > 0) {
-    y = addSectionTitle(doc, y, "Contracts");
+    y = ensurePageSpace(doc, y, 30);
+    y = addSectionTitle(doc, y, "CONTRACTS");
     y = addRawTable(doc, {
       startY: y,
-      head: ["Date", "Pilgrim Count", "Contract Amount", "Paid", "Due"],
-      body: data.contracts.map(c => [fmtDate(c.created_at), String(c.pilgrim_count), formatBDT(c.contract_amount), formatBDT(c.total_paid), formatBDT(c.total_due)]),
+      head: ["Date", "Pilgrim Count", "Contract (BDT)", "Paid (BDT)", "Due (BDT)"],
+      body: data.contracts.map(c => [
+        fmtDate(c.created_at), String(c.pilgrim_count),
+        fmtAmount(c.contract_amount), fmtAmount(c.total_paid), fmtAmount(c.total_due),
+      ]),
+      columnStyles: { 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right", fontStyle: "bold" } },
+      ...INVOICE_TABLE,
     });
   }
 
-  // Contract Payments
   if (data.contractPayments && data.contractPayments.length > 0) {
-    y = addSectionTitle(doc, y, "Contract Payments");
+    y = ensurePageSpace(doc, y, 30);
+    y = addSectionTitle(doc, y, "CONTRACT PAYMENTS");
     y = addRawTable(doc, {
       startY: y,
-      head: ["Amount", "Date", "Method", "Note"],
-      body: data.contractPayments.map(p => [formatBDT(p.amount), fmtDate(p.payment_date), p.payment_method || "cash", p.note || "—"]),
+      head: ["#", "Date", "Method", "Amount (BDT)", "Note"],
+      body: data.contractPayments.map((p, i) => [
+        String(i + 1), fmtDate(p.payment_date),
+        (p.payment_method || "Cash").charAt(0).toUpperCase() + (p.payment_method || "cash").slice(1),
+        fmtAmount(p.amount), p.note || "—",
+      ]),
+      columnStyles: { 0: { cellWidth: 12, halign: "center" }, 3: { halign: "right", fontStyle: "bold" } },
+      ...INVOICE_TABLE,
     });
   }
 
-  addSignatureBlock(doc, sig, y);
-  addPdfFooter(doc, cfg, { showPageNumbers: true });
+  y = ensurePageSpace(doc, y, 50);
+  y = addFinancialSummary(
+    doc, y,
+    data.summary.totalBilled, 0, data.summary.totalBilled,
+    data.summary.totalPaid, data.summary.totalDue
+  );
+
+  y = addSignatureBlock(doc, sig, y);
+  addPdfFooter(doc, cfg);
   doc.save(buildFileName("Supplier", data.agent_name));
 }
 
@@ -216,6 +279,7 @@ export interface CustomerPdfData {
   passport_number?: string | null;
   nid_number?: string | null;
   address?: string | null;
+  notes?: string | null;
   date_of_birth?: string | null;
   emergency_contact?: string | null;
   bookings: { tracking_id: string; package_name: string; total: number; paid: number; due: number; status: string; date: string }[];
@@ -225,55 +289,87 @@ export interface CustomerPdfData {
 
 export async function generateCustomerPdf(data: CustomerPdfData, _company: CompanyInfo) {
   const { doc, logoBase64, sig, qrDataUrl, cfg } = await initPdf();
+  await registerBengaliFont(doc);
 
   let y = await addPdfHeader(doc, cfg, logoBase64, qrDataUrl);
-  addWatermark(doc, getWatermarkStatus(data.summary.totalPaid, data.summary.totalDue));
+  addPaymentWatermark(doc, getWatermarkStatus(data.summary.totalPaid, data.summary.totalDue));
 
-  y = addTitleBlock(doc, y, "Customer Report");
+  y = addBillToAndMeta(
+    doc, y,
+    [
+      { label: "Name", value: data.full_name || "N/A" },
+      { label: "Phone", value: data.phone || "N/A" },
+      { label: "Passport", value: data.passport_number || "N/A" },
+      { label: "Address", value: data.address || "N/A" },
+      { label: "Note", value: data.notes?.trim() || "N/A" },
+    ],
+    [
+      { label: "Report Date", value: reportDate() },
+      { label: "Total Bookings", value: String(data.summary.totalBookings) },
+    ],
+    { title: "CUSTOMER REPORT" }
+  );
 
-  // Info box
-  const fields: InfoField[] = [
-    { label: "Name", value: data.full_name || "N/A" },
-    { label: "Phone", value: data.phone || "N/A" },
-    { label: "Email", value: data.email || "N/A" },
-    { label: "Passport", value: data.passport_number || "N/A" },
-    { label: "NID", value: data.nid_number || "N/A" },
-    { label: "Address", value: data.address || "N/A" },
-  ];
-  y = await addInfoBox(doc, y, fields, "Customer Details");
-
-  // Summary cards
-  const cards: SummaryCard[] = [
-    { label: "Bookings", value: String(data.summary.totalBookings) },
-    { label: "Total Amount", value: fmtBDT(data.summary.totalAmount) },
-    { label: "Total Paid", value: fmtBDT(data.summary.totalPaid) },
-    { label: "Due", value: fmtBDT(data.summary.totalDue), highlight: data.summary.totalDue > 0 },
-  ];
-  y = addSummaryCards(doc, y, cards);
-
-
-  // Bookings table
   if (data.bookings.length > 0) {
-    y = addSectionTitle(doc, y, "Bookings");
+    y = addSectionTitle(doc, y, "BOOKINGS");
     y = addRawTable(doc, {
       startY: y,
-      head: ["Tracking ID", "Package", "Date", "Total", "Paid", "Due", "Status"],
-      body: data.bookings.map(b => [b.tracking_id, b.package_name, fmtDate(b.date), formatBDT(b.total), formatBDT(b.paid), formatBDT(b.due), b.status]),
+      head: ["Tracking ID", "Package", "Date", "Total (BDT)", "Paid (BDT)", "Due (BDT)", "Status"],
+      body: data.bookings.map(b => [
+        b.tracking_id, b.package_name, fmtDate(b.date),
+        fmtAmount(b.total), fmtAmount(b.paid), fmtAmount(b.due),
+        capitalizeStatus(b.status),
+      ]),
+      columnStyles: {
+        3: { halign: "right" },
+        4: { halign: "right" },
+        5: { halign: "right" },
+        6: { halign: "center", cellWidth: 18 },
+      },
+      ...INVOICE_TABLE,
     });
   }
 
-  // Payments table
   if (data.payments.length > 0) {
-    y = addSectionTitle(doc, y, "Payment History");
+    y = ensurePageSpace(doc, y, 30);
+    y = addSectionTitle(doc, y, "PAYMENT HISTORY");
     y = addRawTable(doc, {
       startY: y,
-      head: ["#", "Booking", "Amount", "Date", "Method", "Status"],
-      body: data.payments.map(p => [String(p.installment || "—"), p.tracking_id, formatBDT(p.amount), fmtDate(p.date), p.method || "—", p.status]),
+      head: ["#", "Date", "Booking ID", "Method", "Amount (BDT)", "Status"],
+      body: data.payments.map((p, i) => [
+        String(p.installment ?? i + 1), fmtDate(p.date), p.tracking_id,
+        (p.method || "Manual").charAt(0).toUpperCase() + (p.method || "manual").slice(1),
+        fmtAmount(p.amount), capitalizeStatus(p.status),
+      ]),
+      columnStyles: {
+        0: { cellWidth: 12, halign: "center" },
+        4: { halign: "right", fontStyle: "bold" },
+        5: { halign: "center", cellWidth: 18 },
+      },
+      didParseCell: (cellData: any) => {
+        if (cellData.section === "body" && cellData.column.index === 5) {
+          if (cellData.cell.raw === "Completed" || cellData.cell.raw === "Paid") {
+            cellData.cell.styles.textColor = [34, 139, 34];
+            cellData.cell.styles.fontStyle = "bold";
+          } else if (cellData.cell.raw === "Pending") {
+            cellData.cell.styles.textColor = [210, 140, 20];
+            cellData.cell.styles.fontStyle = "bold";
+          }
+        }
+      },
+      ...INVOICE_TABLE,
     });
   }
 
-  addSignatureBlock(doc, sig, y);
-  addPdfFooter(doc, cfg, { showPageNumbers: true });
+  y = ensurePageSpace(doc, y, 50);
+  y = addFinancialSummary(
+    doc, y,
+    data.summary.totalAmount, 0, data.summary.totalAmount,
+    data.summary.totalPaid, data.summary.totalDue
+  );
+
+  y = addSignatureBlock(doc, sig, y);
+  addPdfFooter(doc, cfg);
   doc.save(buildFileName("Customer", data.full_name || "Unknown"));
 }
 

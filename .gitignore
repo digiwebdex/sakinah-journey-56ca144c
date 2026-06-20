@@ -24,6 +24,9 @@ dist-ssr
 *.sw?
 
 # Server secrets & runtime data (never commit)
+.env
+.env.*
+!.env.example
 server/.env
 server/uploads/
 server/backups/

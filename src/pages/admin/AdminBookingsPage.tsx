@@ -22,6 +22,7 @@ import { format } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { formatBDT, cn, formatTrackingId } from "@/lib/utils";
+import { SecureDocumentImage, SecureDocumentLink } from "@/components/SecureDocumentLink";
 
 const inputClass = "w-full bg-secondary border border-border rounded-md px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40";
 const STATUSES = ["pending", "confirmed", "visa_processing", "ticket_issued", "completed", "cancelled"];
@@ -201,15 +202,16 @@ function BookingDetail({ bookingId }: { bookingId: string }) {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             {documents.map((doc: any) => {
               const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(doc.file_name || doc.file_path || "");
-              const fileUrl = doc.file_path?.startsWith("/") ? doc.file_path : `/uploads/${doc.file_path}`;
               return (
                 <div key={doc.id} className="bg-secondary/30 rounded-lg p-3 space-y-2">
                   <div className="flex items-center justify-between">
                     <Badge variant="outline" className="text-[10px] capitalize">{doc.document_type}</Badge>
-                    <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-primary hover:underline">View</a>
+                    <SecureDocumentLink filePath={doc.file_path} className="text-[10px] text-primary hover:underline">
+                      View
+                    </SecureDocumentLink>
                   </div>
                   {isImage && (
-                    <img src={fileUrl} alt={doc.document_type} className="w-full h-20 object-cover rounded border border-border" />
+                    <SecureDocumentImage filePath={doc.file_path} alt={doc.document_type} className="w-full h-20 object-cover rounded border border-border" />
                   )}
                   <p className="text-[10px] text-muted-foreground truncate">{doc.file_name}</p>
                   {doc.file_size && <p className="text-[10px] text-muted-foreground">{(doc.file_size / 1024).toFixed(1)} KB</p>}
@@ -1244,7 +1246,6 @@ export default function AdminBookingsPage() {
                 {docs.length > 0 ? (
                   <div className="space-y-3">
                     {docs.map((doc: any) => {
-                      const fileUrl = doc.file_path?.startsWith("http") ? doc.file_path : doc.file_path?.startsWith("/") ? doc.file_path : `/uploads/${doc.file_path}`;
                       const fileSizeKB = doc.file_size ? (doc.file_size / 1024).toFixed(1) : null;
                       const uploadDate = doc.created_at ? new Date(doc.created_at).toLocaleDateString("en-GB", { month: "short", day: "2-digit", year: "numeric" }) : "";
                       const uploadTime = doc.created_at ? new Date(doc.created_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "";
@@ -1263,14 +1264,14 @@ export default function AdminBookingsPage() {
                             </div>
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
-                            <a href={fileUrl} target="_blank" rel="noopener noreferrer"
+                            <SecureDocumentLink filePath={doc.file_path}
                               className="inline-flex items-center gap-1 text-xs font-medium text-primary border border-primary/30 rounded-md px-2.5 py-1.5 hover:bg-primary/10 transition-colors">
                               <Eye className="h-3.5 w-3.5" /> View
-                            </a>
-                            <a href={fileUrl} download={doc.file_name}
+                            </SecureDocumentLink>
+                            <SecureDocumentLink filePath={doc.file_path} download={doc.file_name}
                               className="inline-flex items-center justify-center h-8 w-8 rounded-md border border-border hover:bg-secondary transition-colors">
                               <Download className="h-3.5 w-3.5 text-muted-foreground" />
-                            </a>
+                            </SecureDocumentLink>
                           </div>
                         </div>
                       );

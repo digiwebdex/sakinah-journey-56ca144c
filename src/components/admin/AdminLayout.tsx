@@ -49,14 +49,6 @@ export default function AdminLayout() {
         const { data: { user } } = await api.getUser();
         let roles: string[] = user?.roles || [];
 
-        // Fallback: if roles are empty, try fetching from localStorage user
-        if (roles.length === 0) {
-          try {
-            const localUser = JSON.parse(localStorage.getItem('rk_user') || 'null');
-            roles = localUser?.roles || [];
-          } catch {}
-        }
-
         if (roles.length === 0) {
           toast.error("Access denied");
           navigate("/dashboard", { replace: true });
