@@ -32,6 +32,7 @@ export default function AdminInvoicesPage() {
   const [rows, setRows] = useState<InvoiceRecord[]>([]);
   const [packages, setPackages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [detail, setDetail] = useState<InvoiceRecord | null>(null);
   const [editFlight, setEditFlight] = useState<FlightDetails>({});
   const [saving, setSaving] = useState(false);
@@ -44,6 +45,7 @@ export default function AdminInvoicesPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const payload = {
         ...filters,
@@ -52,9 +54,12 @@ export default function AdminInvoicesPage() {
         status: filters.status === "all" ? undefined : filters.status,
       };
       const data = await fetchInvoices(payload);
-      setRows(data);
+      setRows(Array.isArray(data) ? data : []);
     } catch (err: any) {
-      toast.error(err.message || "Failed to load invoices");
+      const message = err.message || "Failed to load invoices";
+      setLoadError(message);
+      setRows([]);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -131,11 +136,14 @@ export default function AdminInvoicesPage() {
     else exportExcel(data);
   };
 
-  const summary = useMemo(() => ({
-    total: rows.reduce((s, r) => s + Number(r.total_amount || 0), 0),
-    paid: rows.reduce((s, r) => s + Number(r.paid_amount || 0), 0),
-    due: rows.reduce((s, r) => s + Number(r.due_amount || 0), 0),
-  }), [rows]);
+  const summary = useMemo(() => {
+    const list = Array.isArray(rows) ? rows : [];
+    return {
+      total: list.reduce((s, r) => s + Number(r.total_amount || 0), 0),
+      paid: list.reduce((s, r) => s + Number(r.paid_amount || 0), 0),
+      due: list.reduce((s, r) => s + Number(r.due_amount || 0), 0),
+    };
+  }, [rows]);
 
   return (
     <div className="space-y-5">
@@ -212,8 +220,9 @@ export default function AdminInvoicesPage() {
               </TableHeader>
               <TableBody>
                 {loading && <TableRow><TableCell colSpan={11} className="text-center py-8 text-muted-foreground">Loading...</TableCell></TableRow>}
-                {!loading && rows.length === 0 && <TableRow><TableCell colSpan={11} className="text-center py-8 text-muted-foreground">No invoices found</TableCell></TableRow>}
-                {!loading && rows.map((r) => (
+                {!loading && loadError && <TableRow><TableCell colSpan={11} className="text-center py-8 text-destructive">{loadError}</TableCell></TableRow>}
+                {!loading && !loadError && rows.length === 0 && <TableRow><TableCell colSpan={11} className="text-center py-8 text-muted-foreground">No invoices found</TableCell></TableRow>}
+                {!loading && !loadError && rows.map((r) => (
                   <TableRow key={r.id} className="hover:bg-muted/30">
                     <TableCell className="font-mono text-xs font-bold text-primary">{r.invoice_number}</TableCell>
                     <TableCell className="text-xs">{r.invoice_date ? format(parseISO(String(r.invoice_date)), "dd MMM yyyy") : "—"}</TableCell>

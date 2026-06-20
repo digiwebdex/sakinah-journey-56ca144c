@@ -131,7 +131,8 @@ export async function fetchInvoices(filters: InvoiceFilters = {}) {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([k, v]) => { if (v) params.set(k, String(v)); });
   const qs = params.toString();
-  return apiRequest(`/invoices${qs ? `?${qs}` : ''}`) as Promise<InvoiceRecord[]>;
+  const data = await apiRequest(`/invoices${qs ? `?${qs}` : ''}`);
+  return Array.isArray(data) ? data : [];
 }
 
 export async function fetchInvoiceStats() {

@@ -90,6 +90,34 @@ async function runBootMigrations() {
     END;
     $$
   `);
+
+  await backfillInvoicesFromBookings();
+}
+
+async function backfillInvoicesFromBookings() {
+  const invoiceService = require('../services/invoiceService');
+  const missing = await query(`
+    SELECT b.id
+    FROM bookings b
+    WHERE b.status <> 'cancelled'
+      AND NOT EXISTS (
+        SELECT 1 FROM invoices i
+        WHERE i.booking_id = b.id AND i.status <> 'cancelled'
+      )
+    ORDER BY b.created_at ASC
+  `);
+
+  for (const row of missing.rows) {
+    try {
+      await invoiceService.syncInvoiceFromBooking(row.id, null);
+    } catch (err) {
+      console.error(`Invoice backfill skipped for booking ${row.id}:`, err.message);
+    }
+  }
+
+  if (missing.rows.length > 0) {
+    console.log(`Invoice backfill: synced ${missing.rows.length} booking(s)`);
+  }
 }
 
 module.exports = { runBootMigrations };
