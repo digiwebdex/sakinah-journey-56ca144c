@@ -8,6 +8,9 @@ const multer = require('multer');
 const { query } = require('./config/database');
 const { authenticate, requireRole, optionalAuth } = require('./middleware/auth');
 const authRoutes = require('./routes/auth');
+const invoiceRoutes = require('./routes/invoices');
+const invoiceService = require('./services/invoiceService');
+const { runBootMigrations } = require('./migrations/bootstrap');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -626,6 +629,8 @@ app.use('/api/daily-cashbook', createCrudRoutes('daily_cashbook', { adminOnly: t
 app.use('/api/refunds', createCrudRoutes('refunds', { adminOnly: true }));
 app.use('/api/cancellation-policies', createCrudRoutes('cancellation_policies', { readAuth: false, writeAuth: true, adminOnly: true }));
 
+app.use('/api/invoices', invoiceRoutes);
+
 // ==============================================
 // BACKUP / RESTORE ROUTES
 // =============================================
@@ -640,7 +645,7 @@ const BACKUP_TABLES = [
   'notification_logs', 'notification_settings',
   'user_roles', 'site_content', 'company_settings',
   'blog_posts', 'cms_versions', 'daily_cashbook',
-  'cancellation_policies', 'refunds',
+  'cancellation_policies', 'refunds', 'invoices', 'invoice_audit_log', 'invoice_sequences',
 ];
 
 const RESTORE_ORDER = [
@@ -1010,6 +1015,12 @@ app.post('/api/create-guest-booking', async (req, res) => {
     );
 
     const booking = bookingResult.rows[0];
+
+    try {
+      await invoiceService.syncInvoiceFromBooking(booking.id, null);
+    } catch (invoiceErr) {
+      console.error('Guest booking invoice sync failed:', invoiceErr.message);
+    }
 
     // Generate installment schedule if plan selected
     if (installment_plan_id) {
@@ -1537,7 +1548,14 @@ app.get('*', (req, res) => {
 // =============================================
 // START
 // =============================================
-app.listen(PORT, () => {
-  console.log(`🚀 Manasik Travel Hub API running on port ${PORT}`);
-  console.log(`📁 Serving frontend from ${frontendPath}`);
-});
+runBootMigrations()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`🚀 Manasik Travel Hub API running on port ${PORT}`);
+      console.log(`📁 Serving frontend from ${frontendPath}`);
+    });
+  })
+  .catch((err) => {
+    console.error('Boot migration failed:', err.message);
+    process.exit(1);
+  });

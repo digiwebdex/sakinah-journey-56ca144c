@@ -9,6 +9,7 @@ import { useIsViewer, useCanModifyFinancials } from "@/components/admin/AdminLay
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import AdminActionMenu from "@/components/admin/AdminActionMenu";
 import CustomerSearchSelect from "@/components/admin/CustomerSearchSelect";
+import { syncInvoiceFromBooking } from "@/lib/invoiceRecords";
 import { formatBDT, formatTrackingId } from "@/lib/utils";
 
 const inputClass = "w-full bg-secondary border border-border rounded-md px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40";
@@ -243,6 +244,7 @@ export default function AdminPaymentsPage() {
           receipt_file_path: receiptPath,
         } as any);
         if (error) throw error;
+        try { if (addForm.booking_id) await syncInvoiceFromBooking(addForm.booking_id); } catch { /* best effort */ }
         toast.success("Payment added successfully");
         setShowAddModal(false);
         resetAddForm();
@@ -303,10 +305,12 @@ export default function AdminPaymentsPage() {
   };
 
   const markPaid = async (id: string, walletId?: string) => {
+    const payment = payments.find((p) => p.id === id);
     const update: any = { status: "completed", paid_at: new Date().toISOString() };
     if (walletId) update.wallet_account_id = walletId;
     const { error } = await supabase.from("payments").update(update).eq("id", id);
     if (error) { toast.error(error.message); return; }
+    try { if (payment?.booking_id) await syncInvoiceFromBooking(payment.booking_id); } catch { /* best effort */ }
     toast.success("Payment completed"); fetchPayments();
   };
 

@@ -1,11 +1,12 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   TrendingUp, DollarSign, Package,
   Users, Wallet, ArrowUpRight, ArrowDownRight, UserCheck,
   CalendarDays, CreditCard, Activity, PieChart, Star, Award,
-  Globe, Plane, Ticket, Building2, MapPin, Layers,
+  Globe, Plane, Ticket, Building2, MapPin, Layers, FileText, Clock, CheckCircle,
 } from "lucide-react";
+import { fetchInvoiceStats } from "@/lib/invoiceRecords";
 import { getMonth, getYear } from "date-fns";
 import { buildPackageProfitReport, summarizePackageProfit } from "@/lib/packageProfitReport";
 import { buildServiceProfitReport, summarizeServiceProfit, SERVICE_CATEGORIES } from "@/lib/serviceProfitReport";
@@ -43,6 +44,12 @@ const AdminDashboardCharts = ({
   const navigate = useNavigate();
   const canSeeProfit = useCanSeeProfit();
   const [showDueCustomers, setShowDueCustomers] = useState(false);
+  const [invoiceStats, setInvoiceStats] = useState<any>(null);
+
+  useEffect(() => {
+    if (!canSeeProfit) return;
+    fetchInvoiceStats().then(setInvoiceStats).catch(() => setInvoiceStats(null));
+  }, [canSeeProfit]);
 
   const financials = useMemo(() => {
     const activeBookings = bookings.filter(b => b.status !== "cancelled");
@@ -239,6 +246,17 @@ const AdminDashboardCharts = ({
           onClick={() => setShowDueCustomers(true)}
         />
       </div>
+
+      {/* ═══ ROW 1A: INVOICE STATUS ═══ */}
+      {canSeeProfit && invoiceStats && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          <KpiCard label="Draft Invoices" value={String(invoiceStats.draft_count || 0)} icon={FileText} iconBg="bg-muted" iconColor="text-muted-foreground" sub="Awaiting review" onClick={() => navigate("/admin/invoices")} />
+          <KpiCard label="Pending Approval" value={String(invoiceStats.pending_count || 0)} icon={Clock} iconBg="bg-yellow-500/10" iconColor="text-yellow-600" sub="Needs admin action" onClick={() => navigate("/admin/invoices")} />
+          <KpiCard label="Finalized" value={String(invoiceStats.finalized_count || 0)} icon={CheckCircle} iconBg="bg-blue-500/10" iconColor="text-blue-600" sub="Ready to bill" onClick={() => navigate("/admin/invoices")} />
+          <KpiCard label="Paid Invoices" value={String(invoiceStats.paid_count || 0)} icon={DollarSign} iconBg="bg-emerald-500/10" iconColor="text-emerald-500" sub="Fully collected" onClick={() => navigate("/admin/invoices")} />
+          <KpiCard label="Outstanding Due" value={formatBDT(Number(invoiceStats.total_due || 0))} icon={ArrowDownRight} iconBg="bg-destructive/10" iconColor="text-destructive" sub={`${invoiceStats.outstanding_count || 0} invoices`} onClick={() => navigate("/admin/invoices")} />
+        </div>
+      )}
 
       {/* ═══ ROW 1B: MONTHLY SERVICE REVENUE ═══ */}
       {canSeeProfit && (

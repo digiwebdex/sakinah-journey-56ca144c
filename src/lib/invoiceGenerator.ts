@@ -242,7 +242,6 @@ function buildFallbackMembers(booking: InvoiceBooking, customer: InvoiceCustomer
 
 // ═══════════════════════════════════════════════════════════════
 // FINANCIAL SUMMARY — two stacked cards (light gray + beige)
-// matching the uploaded sample design exactly
 // ═══════════════════════════════════════════════════════════════
 
 function addFinancialSummary(
@@ -251,11 +250,9 @@ function addFinancialSummary(
   paidAmount: number, dueAmount: number
 ): number {
   const pw = doc.internal.pageSize.getWidth();
-  // Right-aligned compact box (~half page wide)
   const boxW = 95;
   const boxX = pw - 16 - boxW;
 
-  // ── Card 1 (light gray): Gross / Discount / Net Total ──
   const card1H = 26;
   doc.setFillColor(FINANCIAL_CARD_GRAY.r, FINANCIAL_CARD_GRAY.g, FINANCIAL_CARD_GRAY.b);
   doc.rect(boxX, y, boxW, card1H, "F");
@@ -267,23 +264,19 @@ function addFinancialSummary(
   doc.setFontSize(9.5);
   doc.setTextColor(DARK.r, DARK.g, DARK.b);
 
-  // Gross Amount
   doc.setFont("helvetica", "normal");
   doc.text("Gross Amount :", labelX, iy);
   doc.text(`BDT ${formatAmount(grossAmount)}`, valueX, iy, { align: "right" });
   iy += 7;
 
-  // Discount
   doc.text("Discount        :", labelX, iy);
   doc.text(`BDT ${formatAmount(discount)}`, valueX, iy, { align: "right" });
   iy += 7;
 
-  // Net Total (bold)
   doc.setFont("helvetica", "bold");
   doc.text("Net Total       :", labelX, iy);
   doc.text(formatAmount(netTotal), valueX, iy, { align: "right" });
 
-  // ── Card 2 (beige/tan): Paid / Due ──
   const gap = 3;
   const card2Y = y + card1H + gap;
   const card2H = 19;
@@ -303,6 +296,10 @@ function addFinancialSummary(
   doc.setTextColor(0);
   return card2Y + card2H + 6;
 }
+
+// ═══════════════════════════════════════════════════════════════
+// PAYMENT HISTORY TABLE — invoice layout
+// ═══════════════════════════════════════════════════════════════
 
 function addPaymentHistoryTable(doc: jsPDF, y: number, payments: InvoicePayment[]): number {
   y = addSectionTitle(doc, y, "PAYMENT HISTORY");
@@ -359,13 +356,46 @@ function addPaymentHistoryTable(doc: jsPDF, y: number, payments: InvoicePayment[
 }
 
 // ═══════════════════════════════════════════════════════════════
+// FLIGHT DETAILS (Air Ticket invoices)
+// ═══════════════════════════════════════════════════════════════
+
+function addFlightDetailsSection(doc: jsPDF, y: number, flight: Record<string, string | null | undefined>): number {
+  const rows = [
+    ["Passenger Name", flight.passenger_name],
+    ["Passport Number", flight.passport_number],
+    ["PNR Number", flight.pnr_number],
+    ["Airline", flight.airline_name],
+    ["Ticket Number", flight.ticket_number],
+    ["Flight No", flight.flight_number],
+    ["Route", flight.route],
+    ["Departure Date", flight.departure_date],
+    ["Departure Time", flight.departure_time],
+    ["Arrival Date", flight.arrival_date],
+    ["Return Date", flight.return_date],
+    ["Journey Type", flight.journey_type],
+    ["Travel Class", flight.travel_class],
+  ].filter(([, v]) => v);
+  if (rows.length === 0) return y;
+  y = addSectionTitle(doc, y, "FLIGHT INFORMATION");
+  return addRawTable(doc, {
+    startY: y,
+    head: ["Field", "Details"],
+    body: rows.map(([k, v]) => [k, String(v)]),
+    columnStyles: { 0: { fontStyle: "bold", cellWidth: 50 } },
+    fontSize: 9,
+    variant: "invoice",
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
 // INDIVIDUAL INVOICE — matching sample layout exactly
 // ═══════════════════════════════════════════════════════════════
 
 async function generateIndividualInvoice(
   doc: jsPDF, booking: InvoiceBooking, customer: InvoiceCustomer,
   payments: InvoicePayment[], logoBase64: string, sig: SignatureData,
-  qrDataUrl: string, moallemName: string | null, cfg: PdfCompanyConfig
+  qrDataUrl: string, moallemName: string | null, cfg: PdfCompanyConfig,
+  options: GenerateInvoiceOptions = {}
 ) {
   let y = await addPdfHeader(doc, cfg, logoBase64, qrDataUrl);
   const packageName = resolveBookingPackageName(booking as Partial<InvoiceBooking> & Record<string, unknown>, "N/A");
@@ -388,13 +418,17 @@ async function generateIndividualInvoice(
   const bookingTrackingId = formatBookingTrackingId(booking.tracking_id);
 
   const metaFields = [
-    { label: "Invoice No", value: publicTrackingId },
-    { label: "Invoice Date", value: fmtDateLocal(new Date().toISOString()) },
+    { label: "Invoice No", value: options.invoiceNumber || publicTrackingId },
+    { label: "Invoice Date", value: fmtDateLocal(options.invoiceDate || new Date().toISOString()) },
     { label: "Booking ID", value: bookingTrackingId },
     ...(booking.packages?.start_date ? [{ label: "Travel Date", value: fmtDateLocal(booking.packages.start_date) }] : []),
   ];
 
   y = addBillToAndMeta(doc, y, billToFields, metaFields, { title: "INVOICE" });
+
+  if (options.flightDetails) {
+    y = addFlightDetailsSection(doc, y, options.flightDetails);
+  }
 
   // SERVICE DETAILS
   y = addSectionTitle(doc, y, "SERVICE DETAILS");
@@ -448,7 +482,8 @@ async function generateIndividualInvoice(
 async function generateFamilyInvoice(
   doc: jsPDF, booking: InvoiceBooking, customer: InvoiceCustomer,
   payments: InvoicePayment[], members: BookingMember[],
-  logoBase64: string, sig: SignatureData, qrDataUrl: string, moallemName: string | null, cfg: PdfCompanyConfig
+  logoBase64: string, sig: SignatureData, qrDataUrl: string, moallemName: string | null, cfg: PdfCompanyConfig,
+  options: GenerateInvoiceOptions = {}
 ) {
   let y = await addPdfHeader(doc, cfg, logoBase64, qrDataUrl);
   const packageName = resolveBookingPackageName(booking as Partial<InvoiceBooking> & Record<string, unknown>, "N/A");
@@ -468,13 +503,17 @@ async function generateFamilyInvoice(
   const bookingTrackingId = formatBookingTrackingId(booking.tracking_id);
 
   const metaFields = [
-    { label: "Invoice No", value: publicTrackingId },
-    { label: "Invoice Date", value: fmtDateLocal(new Date().toISOString()) },
+    { label: "Invoice No", value: options.invoiceNumber || publicTrackingId },
+    { label: "Invoice Date", value: fmtDateLocal(options.invoiceDate || new Date().toISOString()) },
     { label: "Booking ID", value: bookingTrackingId },
     ...(booking.packages?.start_date ? [{ label: "Travel Date", value: fmtDateLocal(booking.packages.start_date) }] : []),
   ];
 
   y = addBillToAndMeta(doc, y, billToFields, metaFields, { title: "INVOICE" });
+
+  if (options.flightDetails) {
+    y = addFlightDetailsSection(doc, y, options.flightDetails);
+  }
 
   y = addSectionTitle(doc, y, "FAMILY MEMBERS");
 
@@ -520,6 +559,9 @@ async function generateFamilyInvoice(
 export interface GenerateInvoiceOptions {
   members?: Partial<BookingMember>[];
   forceFamily?: boolean;
+  invoiceNumber?: string;
+  invoiceDate?: string;
+  flightDetails?: Record<string, string | null | undefined>;
 }
 
 export async function generateInvoice(
@@ -593,12 +635,13 @@ export async function generateInvoice(
   });
 
   if (hasFamilySignal && invoiceMembers.length > 0) {
-    await generateFamilyInvoice(doc, normalizedBooking, customer, payments, invoiceMembers, logoBase64, sig, qrDataUrl, moallemName, cfg);
+    await generateFamilyInvoice(doc, normalizedBooking, customer, payments, invoiceMembers, logoBase64, sig, qrDataUrl, moallemName, cfg, options);
   } else {
-    await generateIndividualInvoice(doc, normalizedBooking, customer, payments, logoBase64, sig, qrDataUrl, moallemName, cfg);
+    await generateIndividualInvoice(doc, normalizedBooking, customer, payments, logoBase64, sig, qrDataUrl, moallemName, cfg, options);
   }
 
-  doc.save(`Invoice-${formatPublicTrackingIdForFile(normalizedBooking.tracking_id)}.pdf`);
+  const fileId = options.invoiceNumber || formatPublicTrackingIdForFile(normalizedBooking.tracking_id);
+  doc.save(`Invoice-${fileId}.pdf`);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -736,4 +779,91 @@ export async function generateCommissionReceipt(data: CommissionReceiptData, com
   addPdfFooter(doc, cfg);
 
   doc.save(`Commission_Receipt_${toPublicTrackingId(data.bookingTrackingId)}.pdf`);
+}
+
+/** Generate PDF from centralized invoice record (uses booking data when linked). */
+export async function generateInvoiceFromRecord(record: {
+  id: string;
+  invoice_number: string;
+  invoice_date?: string | null;
+  booking_id?: string | null;
+  booking_reference?: string | null;
+  customer_id?: string | null;
+  customer_name?: string | null;
+  customer_phone?: string | null;
+  customer_email?: string | null;
+  customer_address?: string | null;
+  passport_number?: string | null;
+  nid_number?: string | null;
+  service_type?: string;
+  package_name?: string | null;
+  total_amount?: number;
+  paid_amount?: number;
+  due_amount?: number;
+  flight_details?: unknown;
+  notes?: string | null;
+}) {
+  if (!record.booking_id) {
+    throw new Error("PDF requires a linked booking. Sync the invoice from a booking first.");
+  }
+
+  const { data: booking } = await supabase
+    .from("bookings")
+    .select("*, packages(name, type, duration_days, start_date, price)")
+    .eq("id", record.booking_id)
+    .maybeSingle();
+  if (!booking) throw new Error("Linked booking not found");
+
+  const { data: payments } = await supabase
+    .from("payments")
+    .select("*")
+    .eq("booking_id", record.booking_id)
+    .order("installment_number", { ascending: true });
+
+  let profile: InvoiceCustomer = {
+    full_name: record.customer_name || booking.guest_name,
+    phone: record.customer_phone || booking.guest_phone,
+    email: record.customer_email || booking.guest_email,
+    passport_number: record.passport_number || booking.guest_passport,
+    address: record.customer_address || booking.guest_address,
+  };
+
+  if (record.customer_id) {
+    const { data: prof } = await supabase
+      .from("profiles")
+      .select("full_name, phone, email, passport_number, address")
+      .eq("user_id", record.customer_id)
+      .maybeSingle();
+    if (prof) {
+      profile = {
+        full_name: record.customer_name || prof.full_name || profile.full_name,
+        phone: record.customer_phone || prof.phone || profile.phone,
+        email: record.customer_email || prof.email || profile.email,
+        passport_number: record.passport_number || prof.passport_number || profile.passport_number,
+        address: record.customer_address || prof.address || profile.address,
+      };
+    }
+  }
+
+  const flightRaw = typeof record.flight_details === "string"
+    ? (() => { try { return JSON.parse(record.flight_details); } catch { return {}; } })()
+    : (record.flight_details || {});
+
+  await generateInvoice(
+    {
+      ...booking,
+      total_amount: Number(record.total_amount ?? booking.total_amount),
+      paid_amount: Number(record.paid_amount ?? booking.paid_amount),
+      due_amount: Number(record.due_amount ?? booking.due_amount),
+    },
+    profile,
+    (payments || []) as InvoicePayment[],
+    {},
+    {
+      invoiceNumber: record.invoice_number,
+      invoiceDate: record.invoice_date || undefined,
+      flightDetails: record.service_type === "air_ticket" ? flightRaw as Record<string, string | null | undefined> : undefined,
+      forceFamily: String(booking.booking_type || "").toLowerCase().includes("family"),
+    }
+  );
 }

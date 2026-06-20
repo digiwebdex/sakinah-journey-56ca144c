@@ -7,6 +7,7 @@ import {
   ChevronDown, ChevronUp, Crown, FileText,
 } from "lucide-react";
 import CustomerSearchSelect, { type CustomerProfile } from "@/components/admin/CustomerSearchSelect";
+import { syncInvoiceFromBooking } from "@/lib/invoiceRecords";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -464,6 +465,11 @@ export default function AdminCreateBookingPage() {
 
       if (booking) {
         await uploadDocuments(booking.id, selectedCustomerId || session.user.id);
+        try {
+          await syncInvoiceFromBooking(booking.id);
+        } catch {
+          // Invoice sync is best-effort; booking still succeeded
+        }
       }
 
       toast.success(`Booking created! Tracking ID: ${booking?.tracking_id}`);
