@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   CalendarIcon, FileDown, FileSpreadsheet, ChevronDown, ChevronUp, Users,
   TrendingUp, TrendingDown, DollarSign, Filter, Search, Package, Building2,
-  BarChart3, Briefcase, ClipboardList, CreditCard, Layers, Ticket, Globe, Plane
+  BarChart3, Briefcase, ClipboardList, CreditCard, Layers, Ticket, Globe, Plane, PieChart
 } from "lucide-react";
 import {
   format, parseISO, getYear, getMonth, isWithinInterval,
@@ -21,6 +21,8 @@ import {
 import { formatBDT, cn } from "@/lib/utils";
 import { exportPDF, exportExcel } from "@/lib/reportExport";
 import { useCanSeeProfit } from "@/components/admin/AdminLayout";
+import PackageProfitReportTab from "@/components/admin/PackageProfitReportTab";
+import { buildMonthlyPackageRows, buildPackageProfitReport, summarizePackageProfit } from "@/lib/packageProfitReport";
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
@@ -604,6 +606,29 @@ export default function AdminReportsPage() {
         data = { title: "Customer Report", columns: ["Name", "Phone", "Travelers", "Total Amount", "Total Paid", "Total Due"], rows: customerRows.map((r: any) => [r.name, r.phone, r.travelers, r.totalAmount, r.totalPaid, r.totalDue]), summary: makeSummary(totalPaid, totalDue) };
         break;
       }
+      case "package_profit": {
+        const profitRows = buildPackageProfitReport({
+          packages, bookings, payments, expenses, moallemPayments, commissionPayments, supplierPayments, moallemMap, supplierMap,
+        }, {
+          month: getMonth(new Date()),
+          year: getYear(new Date()),
+          packageId: filterPackage,
+          serviceType: filterServiceType,
+          searchQuery,
+        });
+        const profitSummary = summarizePackageProfit(profitRows);
+        data = {
+          title: "Package Sales & Profit Report",
+          columns: ["Package", "Bookings", "Revenue", "Expenses", "Profit", "Margin %"],
+          rows: buildMonthlyPackageRows(profitRows).map((r) => [r.package, r.bookings, r.revenue, r.expenses, r.profit, `${r.margin.toFixed(1)}%`]),
+          summary: [
+            `Total Sales: BDT ${profitSummary.totalSales.toLocaleString("en-IN")}`,
+            `Total Expenses: BDT ${profitSummary.totalExpenses.toLocaleString("en-IN")}`,
+            `Total Profit: BDT ${profitSummary.totalProfit.toLocaleString("en-IN")}`,
+          ],
+        };
+        break;
+      }
       case "package": {
         const cols = canSeeProfit ? ["Package","Type","Travelers","Total Selling","Total Cost","Profit"] : ["Package","Type","Travelers","Total Selling"];
         const rows = packageRows.map((r: any) => canSeeProfit ? [r.name, r.type, r.totalHajji, r.totalSelling, r.totalCost, r.profit] : [r.name, r.type, r.totalHajji, r.totalSelling]);
@@ -670,6 +695,7 @@ export default function AdminReportsPage() {
     { value: "service_type", label: "Service Type", icon: Layers },
     { value: "customer", label: "Customer Wise", icon: Users },
     { value: "package", label: "Package Wise", icon: Package },
+    { value: "package_profit", label: "Package P&L", icon: PieChart },
     { value: "moallem", label: "Moallem Wise", icon: Briefcase },
     { value: "supplier", label: "Supplier Agent", icon: Building2 },
     { value: "supplier_contract", label: "Supplier Contract", icon: FileDown },
@@ -679,7 +705,7 @@ export default function AdminReportsPage() {
 
   const needsDateFilter = activeTab !== "financial";
   const needsSearch = !["financial", "daily"].includes(activeTab);
-  const needsPackageFilter = ["customer", "moallem", "supplier", "daily"].includes(activeTab);
+  const needsPackageFilter = ["customer", "moallem", "supplier", "daily", "package_profit"].includes(activeTab);
   const needsStatusFilter = ["customer", "moallem", "supplier", "daily"].includes(activeTab);
 
   return (
@@ -774,7 +800,7 @@ export default function AdminReportsPage() {
               </Select>
             </>
           )}
-          {(activeTab === "service_type" || activeTab === "package") && serviceTypes.length > 0 && (
+          {(activeTab === "service_type" || activeTab === "package" || activeTab === "package_profit") && serviceTypes.length > 0 && (
             <Select value={filterServiceType} onValueChange={setFilterServiceType}>
               <SelectTrigger className="w-[150px] h-9 text-xs"><SelectValue placeholder="All Types" /></SelectTrigger>
               <SelectContent>
@@ -1184,6 +1210,25 @@ export default function AdminReportsPage() {
                 {canSeeProfit && <TableCell className={cn("text-right font-bold", packageRows.reduce((s: number, r: any) => s + r.profit, 0) >= 0 ? "text-primary" : "text-destructive")}>{formatBDT(packageRows.reduce((s: number, r: any) => s + r.profit, 0))}</TableCell>}
               </>
             }
+          />
+        </TabsContent>
+
+        {/* ═══════════════════════════════════════
+            PACKAGE SALES & PROFIT TAB
+        ═══════════════════════════════════════ */}
+        <TabsContent value="package_profit">
+          <PackageProfitReportTab
+            packages={packages}
+            bookings={bookings}
+            payments={payments}
+            expenses={expenses}
+            moallemPayments={moallemPayments}
+            commissionPayments={commissionPayments}
+            supplierPayments={supplierPayments}
+            moallemMap={moallemMap}
+            supplierMap={supplierMap}
+            canSeeProfit={canSeeProfit}
+            searchQuery={searchQuery}
           />
         </TabsContent>
 

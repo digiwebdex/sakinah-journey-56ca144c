@@ -3,8 +3,10 @@ import { useNavigate } from "react-router-dom";
 import {
   TrendingUp, DollarSign, Package,
   Users, Wallet, ArrowUpRight, ArrowDownRight, UserCheck,
-  CalendarDays, CreditCard, Activity, PieChart,
+  CalendarDays, CreditCard, Activity, PieChart, Star, Award,
 } from "lucide-react";
+import { getMonth, getYear } from "date-fns";
+import { buildPackageProfitReport, summarizePackageProfit } from "@/lib/packageProfitReport";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -26,14 +28,15 @@ interface Props {
   supplierContracts?: any[];
   supplierContractPayments?: any[];
   dailyCashbook?: any[];
+  packages?: any[];
   onMarkPaid: (id: string) => void;
 }
 
 const AdminDashboardCharts = ({
   bookings, payments, expenses = [], accounts = [],
   moallemPayments = [], supplierPayments = [], commissionPayments = [],
-  moallems = [], supplierContracts = [], supplierContractPayments = [],
-  dailyCashbook = [],
+  moallems = [], supplierAgents = [], supplierContracts = [], supplierContractPayments = [],
+  dailyCashbook = [], packages = [],
 }: Props) => {
   const navigate = useNavigate();
   const canSeeProfit = useCanSeeProfit();
@@ -108,6 +111,38 @@ const AdminDashboardCharts = ({
     };
   }, [bookings, payments, expenses, accounts, moallemPayments, supplierPayments, commissionPayments, supplierContractPayments, supplierContracts, moallems, dailyCashbook]);
 
+  const moallemMap = useMemo(() => {
+    const m: Record<string, any> = {};
+    moallems.forEach((ml) => { m[ml.id] = ml; });
+    return m;
+  }, [moallems]);
+
+  const supplierMap = useMemo(() => {
+    const m: Record<string, any> = {};
+    (supplierAgents || []).forEach((sa: any) => { m[sa.id] = sa; });
+    return m;
+  }, [supplierAgents]);
+
+  const monthlyPackageProfit = useMemo(() => {
+    const rows = buildPackageProfitReport({
+      packages,
+      bookings,
+      payments,
+      expenses,
+      moallemPayments,
+      commissionPayments,
+      supplierPayments,
+      moallemMap,
+      supplierMap,
+    }, {
+      month: getMonth(new Date()),
+      year: getYear(new Date()),
+      packageId: "all",
+      serviceType: "all",
+    });
+    return summarizePackageProfit(rows);
+  }, [packages, bookings, payments, expenses, moallemPayments, commissionPayments, supplierPayments, moallemMap, supplierMap]);
+
   const dueCustomers = useMemo(() => {
     const map: Record<string, { name: string; phone: string; totalDue: number; totalAmount: number; bookingCount: number; bookings: any[] }> = {};
     bookings.filter(b => b.status !== "cancelled" && Number(b.due_amount || 0) > 0).forEach(b => {
@@ -177,6 +212,57 @@ const AdminDashboardCharts = ({
           onClick={() => setShowDueCustomers(true)}
         />
       </div>
+
+      {/* ═══ ROW 1B: MONTHLY PACKAGE P&L ═══ */}
+      {canSeeProfit && (
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+          <KpiCard
+            label="Monthly Package Sales"
+            value={formatBDT(monthlyPackageProfit.totalSales)}
+            icon={TrendingUp}
+            iconBg="bg-primary/10"
+            iconColor="text-primary"
+            sub={format(new Date(), "MMMM yyyy")}
+            onClick={() => navigate("/admin/reports")}
+          />
+          <KpiCard
+            label="Monthly Package Expenses"
+            value={formatBDT(monthlyPackageProfit.totalExpenses)}
+            icon={ArrowDownRight}
+            iconBg="bg-destructive/10"
+            iconColor="text-destructive"
+            sub="Linked to packages"
+            onClick={() => navigate("/admin/reports")}
+          />
+          <KpiCard
+            label="Monthly Package Profit"
+            value={formatBDT(monthlyPackageProfit.totalProfit)}
+            icon={PieChart}
+            iconBg={monthlyPackageProfit.totalProfit >= 0 ? "bg-emerald-500/10" : "bg-destructive/10"}
+            iconColor={monthlyPackageProfit.totalProfit >= 0 ? "text-emerald-500" : "text-destructive"}
+            sub="Revenue minus expenses"
+            onClick={() => navigate("/admin/reports")}
+          />
+          <KpiCard
+            label="Best Selling Package"
+            value={monthlyPackageProfit.bestSellingPackage}
+            icon={Star}
+            iconBg="bg-amber-500/10"
+            iconColor="text-amber-600"
+            sub="This month"
+            onClick={() => navigate("/admin/reports")}
+          />
+          <KpiCard
+            label="Most Profitable Package"
+            value={monthlyPackageProfit.mostProfitablePackage}
+            icon={Award}
+            iconBg="bg-emerald-500/10"
+            iconColor="text-emerald-600"
+            sub="This month"
+            onClick={() => navigate("/admin/reports")}
+          />
+        </div>
+      )}
 
       {/* ═══ ROW 2: WALLET + STATS ═══ */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

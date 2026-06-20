@@ -258,6 +258,7 @@ export default function AdminPaymentsPage() {
         const { error } = await supabase.from("moallem_payments").insert({
           moallem_id: addForm.moallem_id,
           booking_id: addForm.booking_id || null,
+          package_id: addForm.booking_id ? allBookings.find((b) => b.id === addForm.booking_id)?.package_id || null : null,
           amount: parseFloat(addForm.amount),
           payment_method: addForm.payment_method,
           date: addForm.paid_date,
