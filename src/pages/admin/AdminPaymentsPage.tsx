@@ -52,6 +52,9 @@ const extractServiceType = (notes: string | null): { serviceValue: string; servi
   return { serviceValue: "", serviceLabel: "", cleanNotes: notes };
 };
 
+const getSupplierPackageName = (payment: any) =>
+  payment?.packages?.name || payment?.bookings?.packages?.name || "—";
+
 export default function AdminPaymentsPage() {
   const isViewer = useIsViewer();
   const canModify = useCanModifyFinancials();
@@ -73,6 +76,7 @@ export default function AdminPaymentsPage() {
     return params.get("action") === "add";
   });
   const [allBookings, setAllBookings] = useState<any[]>([]);
+  const [activePackages, setActivePackages] = useState<any[]>([]);
   const [moallems, setMoallems] = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [paymentType, setPaymentType] = useState<PaymentType>("customer");
@@ -80,7 +84,7 @@ export default function AdminPaymentsPage() {
   const [addForm, setAddForm] = useState({
     customer_id: "", booking_id: "", amount: "",
     payment_method: "cash", transaction_id: "", paid_date: new Date().toISOString().split("T")[0],
-    notes: "", wallet_account_id: "", moallem_id: "", supplier_id: "", service_type: "",
+    notes: "", wallet_account_id: "", moallem_id: "", supplier_id: "", service_type: "", package_id: "",
   });
   const [addLoading, setAddLoading] = useState(false);
   const [selectedBookingInfo, setSelectedBookingInfo] = useState<any>(null);
@@ -96,7 +100,7 @@ export default function AdminPaymentsPage() {
     const [payRes, moallemPayRes, supplierPayRes, walletRes, profileRes] = await Promise.all([
       supabase.from("payments").select("*, bookings(tracking_id, total_amount, paid_amount, due_amount, guest_name, guest_passport, num_travelers, status, packages(name, type, duration_days))").order("created_at", { ascending: false }),
       supabase.from("moallem_payments").select("*, moallems(name, phone), bookings:booking_id(tracking_id, total_amount, paid_amount, due_amount, paid_by_moallem, moallem_due, guest_name, packages(name, type))").order("created_at", { ascending: false }),
-      supabase.from("supplier_agent_payments").select("*, supplier_agents(agent_name, company_name), bookings:booking_id(tracking_id, total_amount, total_cost, paid_to_supplier, supplier_due, guest_name, packages(name, type))").order("created_at", { ascending: false }),
+      supabase.from("supplier_agent_payments").select("*, supplier_agents(agent_name, company_name), packages:package_id(name, type), bookings:booking_id(tracking_id, total_amount, total_cost, paid_to_supplier, supplier_due, guest_name, packages(name, type))").order("created_at", { ascending: false }),
       supabase.from("accounts" as any).select("*").eq("type", "asset"),
       supabase.from("profiles").select("user_id, full_name, phone"),
     ]);
@@ -129,19 +133,21 @@ export default function AdminPaymentsPage() {
     setShowAddModal(true);
     setPaymentType("customer");
     resetAddForm();
-    const [{ data: moallemData }, { data: supplierData }, { data: bookingsData }] = await Promise.all([
+    const [{ data: moallemData }, { data: supplierData }, { data: bookingsData }, { data: packagesData }] = await Promise.all([
       supabase.from("moallems").select("id, name, phone, total_due, total_deposit").eq("status", "active").order("name"),
       supabase.from("supplier_agents").select("id, agent_name, company_name, phone").eq("status", "active").order("agent_name"),
       supabase.from("bookings").select("id, tracking_id, total_amount, paid_amount, due_amount, paid_by_moallem, moallem_due, total_cost, paid_to_supplier, supplier_due, guest_name, guest_phone, guest_passport, user_id, moallem_id, supplier_agent_id, status, packages(name, type)").order("created_at", { ascending: false }),
+      supabase.from("packages").select("id, name, type, price, duration_days, is_active").eq("is_active", true).order("name"),
     ]);
     setMoallems(moallemData || []);
     setSuppliers(supplierData || []);
     setAllBookings(bookingsData || []);
+    setActivePackages(packagesData || []);
     await refreshWallets();
   };
 
   const resetAddForm = () => {
-    setAddForm({ customer_id: "", booking_id: "", amount: "", payment_method: "cash", transaction_id: "", paid_date: new Date().toISOString().split("T")[0], notes: "", wallet_account_id: "", moallem_id: "", supplier_id: "", service_type: "" });
+    setAddForm({ customer_id: "", booking_id: "", amount: "", payment_method: "cash", transaction_id: "", paid_date: new Date().toISOString().split("T")[0], notes: "", wallet_account_id: "", moallem_id: "", supplier_id: "", service_type: "", package_id: "" });
     setSelectedBookingInfo(null);
     setBookingSearch("");
     setReceiptFile(null);
@@ -203,7 +209,7 @@ export default function AdminPaymentsPage() {
   };
 
   const handleSupplierChange = (supplierId: string) => {
-    setAddForm((prev) => ({ ...prev, supplier_id: supplierId, booking_id: "" }));
+    setAddForm((prev) => ({ ...prev, supplier_id: supplierId, booking_id: "", package_id: "" }));
     setSelectedBookingInfo(null);
     setBookingSearch("");
   };
@@ -268,6 +274,7 @@ export default function AdminPaymentsPage() {
       } catch (err: any) { toast.error(err.message); } finally { setAddLoading(false); }
     } else {
       if (!addForm.supplier_id) { toast.error("Please select a supplier"); return; }
+      if (!addForm.package_id) { toast.error("Please select a package"); return; }
       setAddLoading(true);
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -275,7 +282,8 @@ export default function AdminPaymentsPage() {
         const receiptPath = await uploadReceiptFile(tempId);
         const { error } = await supabase.from("supplier_agent_payments").insert({
           supplier_agent_id: addForm.supplier_id,
-          booking_id: addForm.booking_id || null,
+          package_id: addForm.package_id,
+          booking_id: null,
           amount: parseFloat(addForm.amount),
           payment_method: addForm.payment_method,
           date: addForm.paid_date,
@@ -394,7 +402,8 @@ export default function AdminPaymentsPage() {
       _type: "supplier" as PaymentType,
       _sortDate: p.date || p.created_at,
       _displayName: p.supplier_agents?.agent_name || "—",
-      _trackingId: formatTrackingId(p.bookings?.tracking_id) || "—",
+      _packageName: getSupplierPackageName(p),
+      _trackingId: getSupplierPackageName(p),
       _amount: Number(p.amount),
     }));
     let combined: any[] = [];
@@ -410,6 +419,7 @@ export default function AdminPaymentsPage() {
     return combined.filter(p => 
       p._displayName?.toLowerCase().includes(q) ||
       p._trackingId?.toLowerCase().includes(q) ||
+      (p as any)._packageName?.toLowerCase().includes(q) ||
       p.payment_method?.toLowerCase().includes(q) ||
       (p as any).transaction_id?.toLowerCase().includes(q)
     );
@@ -454,8 +464,8 @@ export default function AdminPaymentsPage() {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <h2 className="font-heading text-xl font-bold">Payment Management</h2>
         <div className="flex items-center gap-2">
-          <button onClick={() => { const totalAmt = allCombined.reduce((s, p) => s + p._amount, 0); exportPDF({ title: "Payments Report", columns: ["Type", "Name", "Tracking ID", "Amount", "Method", "Date"], rows: allCombined.map(p => [p._type, p._displayName, p._trackingId, p._amount, p.payment_method || "—", p._sortDate ? new Date(p._sortDate).toLocaleDateString() : "—"]), summary: [`Total Paid: BDT ${totalAmt.toLocaleString("en-IN")}`] }); }} className="inline-flex items-center gap-1 text-xs bg-secondary px-3 py-1.5 rounded-md hover:bg-muted transition-colors"><FileDown className="h-3.5 w-3.5" />PDF</button>
-          <button onClick={() => { const totalAmt = allCombined.reduce((s, p) => s + p._amount, 0); exportExcel({ title: "Payments Report", columns: ["Type", "Name", "Tracking ID", "Amount", "Method", "Date"], rows: allCombined.map(p => [p._type, p._displayName, p._trackingId, p._amount, p.payment_method || "—", p._sortDate ? new Date(p._sortDate).toLocaleDateString() : "—"]), summary: [`Total Paid: BDT ${totalAmt.toLocaleString("en-IN")}`] }); }} className="inline-flex items-center gap-1 text-xs bg-secondary px-3 py-1.5 rounded-md hover:bg-muted transition-colors"><FileSpreadsheet className="h-3.5 w-3.5" />Excel</button>
+          <button onClick={() => { const totalAmt = allCombined.reduce((s, p) => s + p._amount, 0); exportPDF({ title: "Payments Report", columns: ["Type", "Name", "Booking / Package", "Amount", "Method", "Date"], rows: allCombined.map(p => [p._type, p._displayName, p._type === "supplier" ? ((p as any)._packageName || p._trackingId) : p._trackingId, p._amount, p.payment_method || "—", p._sortDate ? new Date(p._sortDate).toLocaleDateString() : "—"]), summary: [`Total Paid: BDT ${totalAmt.toLocaleString("en-IN")}`] }); }} className="inline-flex items-center gap-1 text-xs bg-secondary px-3 py-1.5 rounded-md hover:bg-muted transition-colors"><FileDown className="h-3.5 w-3.5" />PDF</button>
+          <button onClick={() => { const totalAmt = allCombined.reduce((s, p) => s + p._amount, 0); exportExcel({ title: "Payments Report", columns: ["Type", "Name", "Booking / Package", "Amount", "Method", "Date"], rows: allCombined.map(p => [p._type, p._displayName, p._type === "supplier" ? ((p as any)._packageName || p._trackingId) : p._trackingId, p._amount, p.payment_method || "—", p._sortDate ? new Date(p._sortDate).toLocaleDateString() : "—"]), summary: [`Total Paid: BDT ${totalAmt.toLocaleString("en-IN")}`] }); }} className="inline-flex items-center gap-1 text-xs bg-secondary px-3 py-1.5 rounded-md hover:bg-muted transition-colors"><FileSpreadsheet className="h-3.5 w-3.5" />Excel</button>
         </div>
       </div>
 
@@ -600,7 +610,7 @@ export default function AdminPaymentsPage() {
                 <div className="flex items-center gap-4">
                   <span className="font-heading font-bold text-destructive">{formatBDT(group.totalPaid)}</span>
                   <button
-                    onClick={(e) => { e.stopPropagation(); exportPDF({ title: `Supplier Payment History - ${group.name}`, columns: ["#", "Amount", "Method", "Service Type", "Date", "Notes"], rows: group.payments.map((p: any, i: number) => { const { serviceLabel: sl } = extractServiceType(p.notes); return [i + 1, Number(p.amount), p.payment_method || "—", sl || "—", p.date ? new Date(p.date).toLocaleDateString() : "—", p.notes || "—"]; }), summary: [`Total Paid: BDT ${group.totalPaid.toLocaleString("en-IN")}`] }); }}
+                    onClick={(e) => { e.stopPropagation(); exportPDF({ title: `Supplier Payment History - ${group.name}`, columns: ["#", "Package", "Amount", "Method", "Service Type", "Date", "Notes"], rows: group.payments.map((p: any, i: number) => { const { serviceLabel: sl } = extractServiceType(p.notes); return [i + 1, getSupplierPackageName(p), Number(p.amount), p.payment_method || "—", sl || "—", p.date ? new Date(p.date).toLocaleDateString() : "—", p.notes || "—"]; }), summary: [`Total Paid: BDT ${group.totalPaid.toLocaleString("en-IN")}`] }); }}
                     className="inline-flex items-center gap-1 text-xs bg-primary/10 text-primary px-3 py-1.5 rounded-md hover:bg-primary/20 transition-colors"
                   >
                     <FileDown className="h-3.5 w-3.5" /> PDF
@@ -613,6 +623,7 @@ export default function AdminPaymentsPage() {
                     <thead>
                       <tr className="border-b border-border/50 text-left text-muted-foreground bg-muted/20">
                          <th className="py-2 px-4">#</th>
+                         <th className="py-2 px-4">Package</th>
                          <th className="py-2 px-4">Amount</th>
                         <th className="py-2 px-4">Method</th>
                         <th className="py-2 px-4">Service Type</th>
@@ -627,6 +638,7 @@ export default function AdminPaymentsPage() {
                         return (
                         <tr key={p.id} className="border-b border-border/30 hover:bg-secondary/20">
                           <td className="py-2.5 px-4 text-xs text-muted-foreground">{i + 1}</td>
+                          <td className="py-2.5 px-4 text-xs font-medium">{getSupplierPackageName(p)}</td>
                           <td className="py-2.5 px-4 font-medium">{formatBDT(p.amount)}</td>
                           <td className="py-2.5 px-4 capitalize text-xs">{p.payment_method || "—"}</td>
                           <td className="py-2.5 px-4 text-xs">{sLabel || "—"}</td>
@@ -657,7 +669,7 @@ export default function AdminPaymentsPage() {
           <thead>
             <tr className="border-b border-border text-left text-muted-foreground">
               <th className="pb-3 pr-4">Type</th>
-              <th className="pb-3 pr-4">Booking</th>
+              <th className="pb-3 pr-4">{viewTab === "all" ? "Booking / Package" : "Booking"}</th>
               <th className="pb-3 pr-4">Name</th>
               <th className="pb-3 pr-4">Amount</th>
               <th className="pb-3 pr-4">Method</th>
@@ -736,7 +748,7 @@ export default function AdminPaymentsPage() {
                     <td className="py-3" onClick={(e) => e.stopPropagation()}>
                       {(p._type === "moallem" || p._type === "supplier") ? (
                         <AdminActionMenu inlineCount={1} actions={[
-                          { label: "PDF", icon: <FileDown className="h-3.5 w-3.5" />, onClick: () => exportPDF({ title: `Payment - ${p._displayName}`, columns: ["Type", "Tracking ID", "Name", "Amount", "Method", "Date"], rows: [[badge.label, p._trackingId, p._displayName, p._amount, p.payment_method || "—", p.date ? new Date(p.date).toLocaleDateString() : "—"]], summary: [`Total Amount: BDT ${p._amount.toLocaleString("en-IN")}`] }) },
+                          { label: "PDF", icon: <FileDown className="h-3.5 w-3.5" />, onClick: () => exportPDF({ title: `Payment - ${p._displayName}`, columns: ["Type", p._type === "supplier" ? "Package" : "Tracking ID", "Name", "Amount", "Method", "Date"], rows: [[badge.label, p._type === "supplier" ? ((p as any)._packageName || p._trackingId) : p._trackingId, p._displayName, p._amount, p.payment_method || "—", p.date ? new Date(p.date).toLocaleDateString() : "—"]], summary: [`Total Amount: BDT ${p._amount.toLocaleString("en-IN")}`] }) },
                           { label: "Edit", icon: <Edit2 className="h-3.5 w-3.5" />, onClick: () => startEdit(p), variant: "warning", hidden: !canModify },
                           { label: "Delete", icon: <Trash2 className="h-3.5 w-3.5" />, onClick: () => { setDeleteId(p.id); setDeleteType(p._type); }, variant: "destructive", hidden: !canModify },
                         ]} />
@@ -840,7 +852,31 @@ export default function AdminPaymentsPage() {
               </div>
             )}
 
-            {/* Booking selection - searchable, always enabled */}
+            {/* Supplier package selection */}
+            {paymentType === "supplier" && (
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Select Package *</label>
+                <select
+                  className={inputClass}
+                  value={addForm.package_id}
+                  onChange={(e) => setAddForm((prev) => ({ ...prev, package_id: e.target.value }))}
+                  required
+                >
+                  <option value="">-- Select Package --</option>
+                  {activePackages.map((pkg) => (
+                    <option key={pkg.id} value={pkg.id}>
+                      {pkg.name}{pkg.type ? ` (${pkg.type})` : ""}{pkg.price ? ` — ${formatBDT(Number(pkg.price))}` : ""}
+                    </option>
+                  ))}
+                </select>
+                {activePackages.length === 0 && (
+                  <p className="text-xs text-muted-foreground mt-1">No active packages found.</p>
+                )}
+              </div>
+            )}
+
+            {/* Booking selection - customer and moallem only */}
+            {paymentType !== "supplier" && (
             <div>
               <label className="text-xs text-muted-foreground block mb-1">
                 Select Booking {paymentType === "customer" ? "*" : "(Optional)"}
@@ -858,7 +894,7 @@ export default function AdminPaymentsPage() {
                 <option value="">-- Select Booking ({filteredBookings.length}) --</option>
                 {filteredBookings.map((b) => (
                   <option key={b.id} value={b.id}>
-                    {formatTrackingId(b.tracking_id)} — {b.guest_name || "N/A"} ({paymentType === "supplier" ? `Supplier Due: ${formatBDT(Number(b.supplier_due || 0))}` : paymentType === "moallem" ? `Moallem Due: ${formatBDT(Number(b.moallem_due || 0))}` : `Due: ${formatBDT(Number(b.due_amount || 0))}`})
+                    {formatTrackingId(b.tracking_id)} — {b.guest_name || "N/A"} ({paymentType === "moallem" ? `Moallem Due: ${formatBDT(Number(b.moallem_due || 0))}` : `Due: ${formatBDT(Number(b.due_amount || 0))}`})
                   </option>
                 ))}
               </select>
@@ -866,8 +902,9 @@ export default function AdminPaymentsPage() {
                 <p className="text-xs text-muted-foreground mt-1">No bookings found.</p>
               )}
             </div>
+            )}
 
-            {selectedBookingInfo && (
+            {selectedBookingInfo && paymentType !== "supplier" && (
               <div className="bg-secondary/50 rounded-lg p-3 grid grid-cols-3 gap-2 text-xs">
                 {paymentType === "customer" ? (
                   <>
@@ -964,7 +1001,7 @@ export default function AdminPaymentsPage() {
             </div>
             <div className="flex justify-end gap-3 pt-2">
               <button onClick={() => setShowAddModal(false)} className="text-sm px-4 py-2 rounded-md bg-secondary">Cancel</button>
-              <button onClick={handleAddPayment} disabled={addLoading}
+              <button onClick={handleAddPayment} disabled={addLoading || (paymentType === "supplier" && !addForm.package_id)}
                 className="text-sm px-4 py-2 rounded-md bg-gradient-gold text-primary-foreground font-semibold hover:opacity-90 transition-opacity shadow-gold disabled:opacity-50 flex items-center gap-2">
                 <Save className="h-4 w-4" />
                 {addLoading ? "Adding..." : "Add Payment"}
@@ -990,7 +1027,11 @@ export default function AdminPaymentsPage() {
                 </span>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div><span className="text-muted-foreground text-xs block">Booking</span><span className="font-mono font-medium">{viewPayment._trackingId}</span></div>
+                {viewPayment._type === "supplier" ? (
+                  <div><span className="text-muted-foreground text-xs block">Package</span><span className="font-medium">{(viewPayment as any)._packageName || getSupplierPackageName(viewPayment)}</span></div>
+                ) : (
+                  <div><span className="text-muted-foreground text-xs block">Booking</span><span className="font-mono font-medium">{viewPayment._trackingId}</span></div>
+                )}
                 <div><span className="text-muted-foreground text-xs block">Name</span><span className="font-medium">{viewPayment._displayName}</span></div>
                 <div><span className="text-muted-foreground text-xs block">Amount</span><span className="font-bold text-primary">{formatBDT(viewPayment._amount)}</span></div>
                 <div><span className="text-muted-foreground text-xs block">Method</span><span className="font-medium capitalize">{viewPayment.payment_method || "—"}</span></div>
@@ -1035,13 +1076,14 @@ export default function AdminPaymentsPage() {
                   </div>
                 </div>
               )}
-              {viewPayment._type === "supplier" && viewPayment.bookings && (
+              {viewPayment._type === "supplier" && (
                 <div className="border-t border-border/50 pt-3">
-                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Booking Info</h4>
-                  <div className="grid grid-cols-3 gap-3 bg-secondary/50 rounded-lg p-3">
-                    <div><span className="text-muted-foreground text-xs block">Total Cost</span><span className="font-bold">{formatBDT(Number(viewPayment.bookings.total_cost || 0))}</span></div>
-                    <div><span className="text-muted-foreground text-xs block">Supplier Paid</span><span className="font-bold text-emerald">{formatBDT(Number(viewPayment.bookings.paid_to_supplier || 0))}</span></div>
-                    <div><span className="text-muted-foreground text-xs block">Supplier Due</span><span className="font-bold text-destructive">{formatBDT(Number(viewPayment.bookings.supplier_due || 0))}</span></div>
+                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Package Info</h4>
+                  <div className="bg-secondary/50 rounded-lg p-3">
+                    <div><span className="text-muted-foreground text-xs block">Package</span><span className="font-bold">{(viewPayment as any)._packageName || getSupplierPackageName(viewPayment)}</span></div>
+                    {viewPayment.packages?.type && (
+                      <div className="mt-2"><span className="text-muted-foreground text-xs block">Type</span><span className="font-medium capitalize">{viewPayment.packages.type}</span></div>
+                    )}
                   </div>
                 </div>
               )}

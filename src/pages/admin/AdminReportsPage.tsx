@@ -63,7 +63,7 @@ export default function AdminReportsPage() {
       supabase.from("moallem_payments").select("*").order("date", { ascending: false }),
       supabase.from("moallem_commission_payments").select("*").order("date", { ascending: false }),
       supabase.from("supplier_agents").select("*"),
-      supabase.from("supplier_agent_payments").select("*").order("date", { ascending: false }),
+      supabase.from("supplier_agent_payments").select("*, packages:package_id(name, type)").order("date", { ascending: false }),
       supabase.from("packages").select("*"),
       supabase.from("supplier_contracts").select("*").order("created_at", { ascending: false }),
       supabase.from("supplier_contract_payments").select("*").order("payment_date", { ascending: false }),
@@ -102,6 +102,15 @@ export default function AdminReportsPage() {
     supplierAgents.forEach((sa) => { m[sa.id] = sa; });
     return m;
   }, [supplierAgents]);
+
+  const packageMap = useMemo(() => {
+    const m: Record<string, any> = {};
+    packages.forEach((pkg) => { m[pkg.id] = pkg; });
+    return m;
+  }, [packages]);
+
+  const getSupplierPaymentPackageName = (payment: any) =>
+    payment?.packages?.name || packageMap[payment?.package_id]?.name || "-";
 
   const years = useMemo(() => {
     const s = new Set<number>();
@@ -394,6 +403,7 @@ export default function AdminReportsPage() {
         map[sp.supplier_agent_id].paymentDetails.push({
           amount: Number(sp.amount), date: format(parseISO(sp.date), "dd MMM yyyy"),
           method: sp.payment_method || "cash", notes: sp.notes || "-",
+          packageName: getSupplierPaymentPackageName(sp),
         });
       }
     });
@@ -401,7 +411,7 @@ export default function AdminReportsPage() {
     return Object.values(map)
       .filter((r: any) => !q || r.name.toLowerCase().includes(q) || (r.company && r.company.toLowerCase().includes(q)))
       .sort((a: any, b: any) => b.totalCost - a.totalCost);
-  }, [filteredBookings, supplierPayments, supplierMap, profileMap, dateInterval, searchQuery]);
+  }, [filteredBookings, supplierPayments, supplierMap, profileMap, dateInterval, searchQuery, packageMap]);
 
   // ══════════════════════════════════════════════
   //  SUPPLIER CONTRACT REPORT
@@ -504,7 +514,8 @@ export default function AdminReportsPage() {
       try { if (!isWithinInterval(parseISO(sp.date), dateInterval)) return; } catch { return; }
       rows.push({
         source: "Supplier Agent", name: supplierMap[sp.supplier_agent_id]?.agent_name || "-",
-        trackingId: "-", amount: Number(sp.amount), method: sp.payment_method || "cash",
+        trackingId: getSupplierPaymentPackageName(sp),
+        amount: Number(sp.amount), method: sp.payment_method || "cash",
         date: format(parseISO(sp.date), "dd MMM yyyy"), type: "expense",
       });
     });
@@ -531,7 +542,7 @@ export default function AdminReportsPage() {
     return rows
       .filter(r => !q || r.name.toLowerCase().includes(q) || r.source.toLowerCase().includes(q))
       .sort((a, b) => b.date.localeCompare(a.date));
-  }, [payments, moallemPayments, supplierPayments, commissionPayments, supplierContractPayments, supplierContracts, bookings, moallemMap, supplierMap, dateInterval, searchQuery]);
+  }, [payments, moallemPayments, supplierPayments, commissionPayments, supplierContractPayments, supplierContracts, bookings, moallemMap, supplierMap, packageMap, dateInterval, searchQuery]);
 
   // ══════════════════════════════════════════════
   //  COMMISSION REPORT
@@ -1332,11 +1343,12 @@ export default function AdminReportsPage() {
                     <p className="text-xs font-semibold text-muted-foreground mb-2">Payment History</p>
                     <table className="w-full text-sm">
                       <thead><tr className="text-left text-muted-foreground border-b border-border/50">
-                        <th className="pb-2 pr-3">Date</th><th className="pb-2 pr-3 text-right">Amount</th><th className="pb-2 pr-3">Method</th><th className="pb-2">Notes</th>
+                        <th className="pb-2 pr-3">Package</th><th className="pb-2 pr-3">Date</th><th className="pb-2 pr-3 text-right">Amount</th><th className="pb-2 pr-3">Method</th><th className="pb-2">Notes</th>
                       </tr></thead>
                       <tbody>
                         {r.paymentDetails.map((pd: any, j: number) => (
                           <tr key={j} className="border-b border-border/30">
+                            <td className="py-2 pr-3 font-medium">{pd.packageName || "-"}</td>
                             <td className="py-2 pr-3 text-muted-foreground">{pd.date}</td>
                             <td className="py-2 pr-3 text-right text-primary font-medium">{formatBDT(pd.amount)}</td>
                             <td className="py-2 pr-3 capitalize">{pd.method}</td>
@@ -1481,7 +1493,7 @@ export default function AdminReportsPage() {
                   <TableRow>
                     <TableHead>Source</TableHead>
                     <TableHead>Name</TableHead>
-                    <TableHead>Tracking ID</TableHead>
+                    <TableHead>Booking / Package</TableHead>
                     <TableHead>Date</TableHead>
                     <TableHead className="text-right">Amount</TableHead>
                     <TableHead>Method</TableHead>

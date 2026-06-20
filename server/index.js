@@ -579,11 +579,13 @@ app.get('/api/supplier-agent-payments', authenticate, async (req, res) => {
     });
     let sql = `SELECT sp.*,
       CASE WHEN sa.id IS NOT NULL THEN json_build_object('agent_name', sa.agent_name, 'company_name', sa.company_name) ELSE NULL END as supplier_agents,
-      CASE WHEN b.id IS NOT NULL THEN json_build_object('tracking_id', b.tracking_id, 'total_amount', b.total_amount, 'total_cost', b.total_cost, 'paid_to_supplier', b.paid_to_supplier, 'supplier_due', b.supplier_due, 'guest_name', b.guest_name, 'packages', json_build_object('name', p.name, 'type', p.type)) ELSE NULL END as bookings
+      CASE WHEN pkg.id IS NOT NULL THEN json_build_object('name', pkg.name, 'type', pkg.type) ELSE NULL END as packages,
+      CASE WHEN b.id IS NOT NULL THEN json_build_object('tracking_id', b.tracking_id, 'total_amount', b.total_amount, 'total_cost', b.total_cost, 'paid_to_supplier', b.paid_to_supplier, 'supplier_due', b.supplier_due, 'guest_name', b.guest_name, 'packages', json_build_object('name', bp.name, 'type', bp.type)) ELSE NULL END as bookings
       FROM supplier_agent_payments sp
       LEFT JOIN supplier_agents sa ON sp.supplier_agent_id = sa.id
+      LEFT JOIN packages pkg ON sp.package_id = pkg.id
       LEFT JOIN bookings b ON sp.booking_id = b.id
-      LEFT JOIN packages p ON b.package_id = p.id`;
+      LEFT JOIN packages bp ON b.package_id = bp.id`;
     if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
     sql += ` ORDER BY sp.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
     params.push(Number(limit) || 1000, Number(offset) || 0);
