@@ -4,9 +4,11 @@ import {
   TrendingUp, DollarSign, Package,
   Users, Wallet, ArrowUpRight, ArrowDownRight, UserCheck,
   CalendarDays, CreditCard, Activity, PieChart, Star, Award,
+  Globe, Plane, Ticket, Building2, MapPin, Layers,
 } from "lucide-react";
 import { getMonth, getYear } from "date-fns";
 import { buildPackageProfitReport, summarizePackageProfit } from "@/lib/packageProfitReport";
+import { buildServiceProfitReport, summarizeServiceProfit, SERVICE_CATEGORIES } from "@/lib/serviceProfitReport";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -143,6 +145,31 @@ const AdminDashboardCharts = ({
     return summarizePackageProfit(rows);
   }, [packages, bookings, payments, expenses, moallemPayments, commissionPayments, supplierPayments, moallemMap, supplierMap]);
 
+  const monthlyServiceProfit = useMemo(() => {
+    const rows = buildServiceProfitReport({
+      packages,
+      bookings,
+      expenses,
+      moallemPayments,
+      commissionPayments,
+      supplierPayments,
+    }, {
+      month: getMonth(new Date()),
+      year: getYear(new Date()),
+      serviceKey: "all",
+    });
+    return summarizeServiceProfit(rows);
+  }, [packages, bookings, expenses, moallemPayments, commissionPayments, supplierPayments]);
+
+  const SERVICE_ICONS: Record<string, any> = {
+    hajj: Globe,
+    umrah: Globe,
+    air_ticket: Plane,
+    hotel: Building2,
+    visa: Ticket,
+    tour: MapPin,
+  };
+
   const dueCustomers = useMemo(() => {
     const map: Record<string, { name: string; phone: string; totalDue: number; totalAmount: number; bookingCount: number; bookings: any[] }> = {};
     bookings.filter(b => b.status !== "cancelled" && Number(b.due_amount || 0) > 0).forEach(b => {
@@ -213,7 +240,46 @@ const AdminDashboardCharts = ({
         />
       </div>
 
-      {/* ═══ ROW 1B: MONTHLY PACKAGE P&L ═══ */}
+      {/* ═══ ROW 1B: MONTHLY SERVICE REVENUE ═══ */}
+      {canSeeProfit && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+          {SERVICE_CATEGORIES.map((s) => {
+            const Icon = SERVICE_ICONS[s.key] || Layers;
+            return (
+              <KpiCard
+                key={s.key}
+                label={`${s.label} Revenue`}
+                value={formatBDT(monthlyServiceProfit.byService[s.key].revenue)}
+                icon={Icon}
+                iconBg="bg-primary/10"
+                iconColor="text-primary"
+                sub={format(new Date(), "MMMM yyyy")}
+                onClick={() => navigate("/admin/reports")}
+              />
+            );
+          })}
+          <KpiCard
+            label="Total Expenses"
+            value={formatBDT(monthlyServiceProfit.totalExpenses)}
+            icon={ArrowDownRight}
+            iconBg="bg-destructive/10"
+            iconColor="text-destructive"
+            sub="By service type"
+            onClick={() => navigate("/admin/reports")}
+          />
+          <KpiCard
+            label="Net Profit"
+            value={formatBDT(monthlyServiceProfit.netProfit)}
+            icon={TrendingUp}
+            iconBg={monthlyServiceProfit.netProfit >= 0 ? "bg-emerald-500/10" : "bg-destructive/10"}
+            iconColor={monthlyServiceProfit.netProfit >= 0 ? "text-emerald-500" : "text-destructive"}
+            sub={`Best: ${monthlyServiceProfit.bestService}`}
+            onClick={() => navigate("/admin/reports")}
+          />
+        </div>
+      )}
+
+      {/* ═══ ROW 1C: MONTHLY PACKAGE P&L ═══ */}
       {canSeeProfit && (
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
           <KpiCard
