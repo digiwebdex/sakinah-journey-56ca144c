@@ -532,12 +532,18 @@ async function generateFamilyInvoice(
       return [String(i + 1), name, passport, pkg, formatAmount(Number(m.selling_price)), formatAmount(Number(m.discount)), formatAmount(Number(m.final_price))];
     }),
     foot: [["", "", "", "TOTAL", formatAmount(totalGross), formatAmount(totalDiscount), formatAmount(totalFinal)]],
+    // Widths add up to the 178mm of usable page. The package column was 34mm,
+    // which wrapped every package name onto three lines and pushed a nine-member
+    // invoice onto a third page. 46mm is the point where "PACKAGE (SEPTEMBER)"
+    // fits on one line, so the row needs two lines instead of three.
     columnStyles: {
       0: { cellWidth: 12, halign: "center" },
-      3: { cellWidth: 34 },
-      4: { halign: "right" },
-      5: { halign: "right" },
-      6: { halign: "right", fontStyle: "bold" },
+      1: { cellWidth: 35 },
+      2: { cellWidth: 24 },
+      3: { cellWidth: 46 },
+      4: { cellWidth: 20, halign: "right" },
+      5: { cellWidth: 18, halign: "right" },
+      6: { cellWidth: 23, halign: "right", fontStyle: "bold" },
     },
     variant: "invoice",
   });
