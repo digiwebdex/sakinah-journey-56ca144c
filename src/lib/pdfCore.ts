@@ -32,7 +32,7 @@ export const WHITE = { r: 255, g: 255, b: 255 };
 export const GOLD = BRAND_ORANGE;
 export const ORANGE = BRAND_ORANGE;
 
-export const FOOTER_HEIGHT = 29; // ~0.5in shorter than prior 42mm bar (1.14in total)
+export const FOOTER_HEIGHT = 32; // matches the sample invoice footer band
 // Clear space kept between the last content and the orange footer bar.
 const CONTENT_BOTTOM_PADDING = 12;
 const CONTINUATION_START_Y = 18;
@@ -346,31 +346,36 @@ export function addPdfFooter(doc: jsPDF, cfg: PdfCompanyConfig, options?: { show
       doc.setLineWidth(0.2);
     };
 
-    // Phone numbers - left side with phone icon
-    drawIconCircle(MARGIN + 3, barY + 9, 2.2, "phone");
-    doc.setFontSize(7.5);
+    // Two baselines shared by the phone and the email/website blocks, centred
+    // in the bar so the band reads as one line of contact details.
+    const lineOneY = barY + 14;
+    const lineTwoY = barY + 22;
+
+    // Phone numbers — left, one icon spanning both lines as in the sample
+    drawIconCircle(MARGIN + 4, barY + 17.5, 3.2, "phone");
+    doc.setFontSize(10.5);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(255);
-    doc.text(cfg.phone, MARGIN + 8, barY + 7.5);
-    doc.text(phone2, MARGIN + 8, barY + 12.5);
+    doc.text(cfg.phone, MARGIN + 10, lineOneY);
+    doc.text(phone2, MARGIN + 10, lineTwoY);
 
-    // Email & website - center with envelope + globe icons
-    const centerX = pw / 2 - 5;
-    drawIconCircle(centerX - 5, barY + 6.5, 1.8, "email");
-    drawIconCircle(centerX - 5, barY + 11.5, 1.8, "web");
+    // Email & website — left of centre, each with its own icon
+    const centerX = pw * 0.36;
+    drawIconCircle(centerX - 6, lineOneY - 1.3, 2.6, "email");
+    drawIconCircle(centerX - 6, lineTwoY - 1.3, 2.6, "web");
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(7);
+    doc.setFontSize(9.5);
     doc.setTextColor(255);
-    doc.text(cfg.email || "manasiktravelhub.info@gmail.com", centerX, barY + 7.5);
-    doc.text("manasiktravelhub.com", centerX, barY + 12.5);
+    doc.text(cfg.email || "manasiktravelhub.info@gmail.com", centerX, lineOneY);
+    doc.text("manasiktravelhub.com", centerX, lineTwoY);
 
     // Thank You — right side (compact script, matching sample proportions)
     const thankYouRight = pw - MARGIN - 4;
-    const taglineY = barY + 12.5;
+    const taglineY = barY + 23.5;
     try {
-      const script = renderScriptTextImage("Thank You", 10, "#FFFFFF");
-      const maxW = 28;
-      const maxH = 5.5;
+      const script = renderScriptTextImage("Thank You", 22, "#FFFFFF");
+      const maxW = 46;
+      const maxH = 11;
       let drawW = script.width;
       let drawH = script.height;
       if (drawW > maxW) {
@@ -384,25 +389,25 @@ export function addPdfFooter(doc: jsPDF, cfg: PdfCompanyConfig, options?: { show
         drawW = drawW * r;
       }
       const drawX = thankYouRight - drawW;
-      const drawY = barY + 2.5;
+      const drawY = barY + 6 + (maxH - drawH) / 2;
       doc.addImage(script.dataUrl, "PNG", drawX, drawY, drawW, drawH);
     } catch {
-      doc.setFontSize(10);
+      doc.setFontSize(19);
       doc.setFont("helvetica", "bolditalic");
       doc.setTextColor(255);
-      doc.text("Thank You", thankYouRight, barY + 7.5, { align: "right" });
+      doc.text("Thank You", thankYouRight, barY + 15, { align: "right" });
     }
-    doc.setFontSize(5.5);
+    doc.setFontSize(7.5);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(255);
     doc.text("Stay With MANASIK TRAVEL HUB", thankYouRight, taglineY, { align: "right" });
 
     // Page numbers
     if (options?.showPageNumbers !== false && totalPages > 1) {
-      doc.setFontSize(5.5);
+      doc.setFontSize(6.5);
       doc.setFont("helvetica", "normal");
-      doc.setTextColor(200);
-      doc.text(`Page ${i} of ${totalPages}`, pw - MARGIN - 4, barY + 17, { align: "right" });
+      doc.setTextColor(255, 225, 205);
+      doc.text(`Page ${i} of ${totalPages}`, pw / 2, barY + barH - 3, { align: "center" });
     }
 
     // Address — single compact line when bar is short (sample has no address in footer)
