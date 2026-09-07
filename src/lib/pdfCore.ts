@@ -33,7 +33,8 @@ export const GOLD = BRAND_ORANGE;
 export const ORANGE = BRAND_ORANGE;
 
 export const FOOTER_HEIGHT = 29; // ~0.5in shorter than prior 42mm bar (1.14in total)
-const CONTENT_BOTTOM_PADDING = 4;
+// Clear space kept between the last content and the orange footer bar.
+const CONTENT_BOTTOM_PADDING = 12;
 const CONTINUATION_START_Y = 18;
 /** Shared left edge — logo, BILL TO, and section titles align here */
 export const MARGIN = 16;
@@ -975,7 +976,7 @@ export interface PdfTableOptions {
   columnStyles?: Record<number, any>;
   showHead?: "everyPage" | "firstPage" | "never";
   fontSize?: number;
-  margin?: { left?: number; right?: number };
+  margin?: { left?: number; right?: number; bottom?: number };
   didParseCell?: (data: any) => void;
   /** `invoice` = light grey rows + white column dividers (sample invoice table) */
   variant?: "default" | "invoice";
@@ -1045,7 +1046,15 @@ export function addTable(doc: jsPDF, options: PdfTableOptions): number {
     },
     alternateRowStyles: { fillColor: [255, 255, 255] },
     columnStyles: options.columnStyles || {},
-    margin: { left: options.margin?.left || MARGIN, right: options.margin?.right || MARGIN },
+    margin: {
+      left: options.margin?.left || MARGIN,
+      right: options.margin?.right || MARGIN,
+      // Stop the table before the orange footer bar instead of running under it.
+      bottom: options.margin?.bottom ?? (FOOTER_HEIGHT + CONTENT_BOTTOM_PADDING),
+    },
+    // A row split across the page boundary gets clipped by the footer, so move
+    // the whole row to the next page instead.
+    rowPageBreak: "avoid",
     didParseCell: buildDidParseCell(options.didParseCell),
     didDrawCell: bengaliCellHook,
   });
@@ -1098,7 +1107,15 @@ export function addRawTable(doc: jsPDF, options: PdfTableOptions): number {
       ? { fillColor: [TABLE_ROW_BG.r, TABLE_ROW_BG.g, TABLE_ROW_BG.b] }
       : { fillColor: [255, 255, 255] },
     columnStyles: options.columnStyles || {},
-    margin: { left: options.margin?.left || MARGIN, right: options.margin?.right || MARGIN },
+    margin: {
+      left: options.margin?.left || MARGIN,
+      right: options.margin?.right || MARGIN,
+      // Stop the table before the orange footer bar instead of running under it.
+      bottom: options.margin?.bottom ?? (FOOTER_HEIGHT + CONTENT_BOTTOM_PADDING),
+    },
+    // A row split across the page boundary gets clipped by the footer, so move
+    // the whole row to the next page instead.
+    rowPageBreak: "avoid",
     didParseCell: buildDidParseCell((data) => {
       if (isInvoice && data.section === "body") {
         data.cell.styles.fillColor = [TABLE_ROW_BG.r, TABLE_ROW_BG.g, TABLE_ROW_BG.b];

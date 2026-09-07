@@ -81,7 +81,8 @@ const fmtDateLocal = (d: string | null) =>
   d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
 const FOOTER_HEIGHT_LOCAL = FOOTER_HEIGHT;
-const CONTENT_BOTTOM_PADDING = 4;
+// Clear space kept between the last content and the orange footer bar.
+const CONTENT_BOTTOM_PADDING = 12;
 const CONTINUATION_START_Y = 18;
 const MARGIN = 16;
 
