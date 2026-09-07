@@ -367,7 +367,7 @@ export default function AdminPackagesPage() {
               <div className="flex items-center gap-3 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
                 <p className="font-heading font-bold text-primary">BDT {Number(p.price).toLocaleString("en-IN")}</p>
                 <AdminActionMenu
-                  inlineCount={2}
+                  primary={["View", "Edit", "Delete"]}
                   actions={[
                     { label: "View", icon: <Eye className="h-3.5 w-3.5" />, onClick: () => setViewPkg(p) },
                     { label: "Supplier Contracts", icon: <Handshake className="h-3.5 w-3.5" />, onClick: () => setContractsPkg(p), variant: "purple" },

@@ -301,7 +301,7 @@ export default function AdminMoallemsPage() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-center" onClick={e => e.stopPropagation()}>
-                        <AdminActionMenu actions={getActions(m)} inlineCount={1} />
+                        <AdminActionMenu actions={getActions(m)} primary={["View", "Edit", "Delete"]} />
                       </TableCell>
                     </TableRow>
                   );

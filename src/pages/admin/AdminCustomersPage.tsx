@@ -348,7 +348,7 @@ export default function AdminCustomersPage() {
                       <TableCell className="text-right font-medium text-emerald-600">{formatBDT(stats.totalPaid)}</TableCell>
                       <TableCell className="text-right font-medium text-destructive">{formatBDT(stats.totalDue)}</TableCell>
                       <TableCell className="text-center" onClick={e => e.stopPropagation()}>
-                        <AdminActionMenu actions={getActions(c)} inlineCount={1} />
+                        <AdminActionMenu actions={getActions(c)} primary={["View", "Edit", "Delete"]} />
                       </TableCell>
                     </TableRow>
                   );

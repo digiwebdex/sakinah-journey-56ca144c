@@ -68,6 +68,40 @@ router.post('/:id/action/:action', authenticate, requireRole('admin'), async (re
   }
 });
 
+// An invoice may only be deleted while it is still a working document. Once
+// money has been recorded against it, or it has been finalised, the number is
+// part of the ledger's history and the invoice must be cancelled instead.
+router.delete('/:id', authenticate, requireRole('admin'), async (req, res) => {
+  try {
+    const found = await query(
+      'SELECT id, invoice_number, status, paid_amount FROM invoices WHERE id = $1',
+      [req.params.id]
+    );
+    if (found.rowCount === 0) return res.status(404).json({ error: 'Invoice not found' });
+
+    const invoice = found.rows[0];
+    if (Number(invoice.paid_amount || 0) > 0) {
+      return res.status(400).json({
+        error: `Invoice ${invoice.invoice_number} already has payments recorded against it. Cancel it instead of deleting it.`,
+      });
+    }
+
+    const locked = ['finalized', 'paid', 'partially_paid'];
+    if (locked.includes(invoice.status)) {
+      return res.status(400).json({
+        error: `Invoice ${invoice.invoice_number} is ${invoice.status}. Cancel it instead of deleting it.`,
+      });
+    }
+
+    // invoice_audit_log cascades with the invoice.
+    await query('DELETE FROM invoices WHERE id = $1', [req.params.id]);
+    res.json({ ok: true, id: req.params.id, invoice_number: invoice.invoice_number });
+  } catch (err) {
+    console.error('DELETE /api/invoices/:id error:', err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
 router.post('/sync/booking/:bookingId', authenticate, requireRole(...staffRoles), async (req, res) => {
   try {
     const row = await invoiceService.syncInvoiceFromBooking(req.params.bookingId, req.user?.id);

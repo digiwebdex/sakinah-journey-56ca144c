@@ -2,13 +2,14 @@ import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/api";
 import { toast } from "sonner";
 import { useIsViewer, useCanModifyFinancials } from "@/components/admin/AdminLayout";
+import AdminActionMenu from "@/components/admin/AdminActionMenu";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   RefreshCw, Plus, Search, RotateCcw, CheckCircle, XCircle,
-  AlertTriangle, DollarSign, TrendingDown, FileText
+  AlertTriangle, DollarSign, TrendingDown, FileText, Eye, Edit2, Trash2
 } from "lucide-react";
 import { format } from "date-fns";
 import { formatBDT } from "@/lib/utils";
@@ -43,6 +44,9 @@ export default function AdminRefundsPage() {
 
   // Modals
   const [showAddRefund, setShowAddRefund] = useState(false);
+  const [viewRefund, setViewRefund] = useState<any>(null);
+  const [editingRefundId, setEditingRefundId] = useState<string | null>(null);
+  const [deleteRefund, setDeleteRefund] = useState<any>(null);
   const [showPolicyModal, setShowPolicyModal] = useState(false);
   const [selectedBookingId, setSelectedBookingId] = useState("");
   const [selectedPolicyId, setSelectedPolicyId] = useState("");
@@ -110,7 +114,7 @@ export default function AdminRefundsPage() {
     if (!selectedBookingId) { toast.error("বুকিং নির্বাচন করুন"); return; }
     if (refundForm.refund_amount <= 0) { toast.error("রিফান্ড পরিমাণ ০ এর বেশি হতে হবে"); return; }
 
-    const { error } = await supabase.from("refunds").insert({
+    const payload = {
       booking_id: selectedBookingId,
       policy_id: selectedPolicyId || null,
       original_amount: refundForm.original_amount,
@@ -119,13 +123,48 @@ export default function AdminRefundsPage() {
       refund_method: refundForm.refund_method,
       wallet_account_id: refundForm.wallet_account_id || null,
       reason: refundForm.reason,
-      status: "pending",
-    });
+    };
+
+    const { error } = editingRefundId
+      ? await supabase.from("refunds").update({ ...payload, updated_at: new Date().toISOString() }).eq("id", editingRefundId)
+      : await supabase.from("refunds").insert({ ...payload, status: "pending" });
 
     if (error) { toast.error(error.message); return; }
-    toast.success("রিফান্ড রিকুয়েস্ট তৈরি হয়েছে");
+    toast.success(editingRefundId ? "রিফান্ড আপডেট হয়েছে" : "রিফান্ড রিকুয়েস্ট তৈরি হয়েছে");
     setShowAddRefund(false);
+    setEditingRefundId(null);
     resetForm();
+    fetchAll();
+  };
+
+  // A processed refund has already left the wallet, so it is read-only from here.
+  const startEditRefund = (r: any) => {
+    if (r.status === "processed") { toast.error("প্রসেস হয়ে যাওয়া রিফান্ড সম্পাদনা করা যাবে না"); return; }
+    setEditingRefundId(r.id);
+    setSelectedBookingId(r.booking_id || "");
+    setSelectedPolicyId(r.policy_id || "");
+    setRefundForm({
+      refund_amount: Number(r.refund_amount || 0),
+      deduction_amount: Number(r.deduction_amount || 0),
+      original_amount: Number(r.original_amount || 0),
+      refund_method: r.refund_method || "cash",
+      wallet_account_id: r.wallet_account_id || "",
+      reason: r.reason || "",
+    });
+    setShowAddRefund(true);
+  };
+
+  const confirmDeleteRefund = async () => {
+    if (!deleteRefund) return;
+    if (deleteRefund.status === "processed") {
+      toast.error("প্রসেস হয়ে যাওয়া রিফান্ড মুছে ফেলা যাবে না");
+      setDeleteRefund(null);
+      return;
+    }
+    const { error } = await supabase.from("refunds").delete().eq("id", deleteRefund.id);
+    if (error) { toast.error(error.message); return; }
+    toast.success("রিফান্ড মুছে ফেলা হয়েছে");
+    setDeleteRefund(null);
     fetchAll();
   };
 
@@ -245,7 +284,7 @@ export default function AdminRefundsPage() {
               <th className="text-center px-4 py-3 font-medium text-muted-foreground">মাধ্যম</th>
               <th className="text-center px-4 py-3 font-medium text-muted-foreground">স্ট্যাটাস</th>
               <th className="text-left px-4 py-3 font-medium text-muted-foreground">তারিখ</th>
-              {!isViewer && <th className="text-center px-4 py-3 font-medium text-muted-foreground">অ্যাকশন</th>}
+              <th className="text-center px-4 py-3 font-medium text-muted-foreground">অ্যাকশন</th>
             </tr>
           </thead>
           <tbody>
@@ -263,27 +302,21 @@ export default function AdminRefundsPage() {
                   <Badge className={STATUS_COLORS[r.status] || ""}>{r.status}</Badge>
                 </td>
                 <td className="px-4 py-3 text-xs">{format(new Date(r.created_at), "dd/MM/yyyy")}</td>
-                {!isViewer && (
-                  <td className="px-4 py-3 text-center">
-                    <div className="flex gap-1 justify-center">
-                      {r.status === "pending" && canModify && (
-                        <>
-                          <Button size="sm" variant="ghost" className="text-emerald-600 h-7 px-2" onClick={() => handleUpdateStatus(r.id, "approved")}>
-                            <CheckCircle className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button size="sm" variant="ghost" className="text-destructive h-7 px-2" onClick={() => handleUpdateStatus(r.id, "rejected")}>
-                            <XCircle className="h-3.5 w-3.5" />
-                          </Button>
-                        </>
-                      )}
-                      {r.status === "approved" && canModify && (
-                        <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => handleUpdateStatus(r.id, "processed")}>
-                          <DollarSign className="h-3.5 w-3.5 mr-1" /> প্রসেস
-                        </Button>
-                      )}
-                    </div>
-                  </td>
-                )}
+                <td className="px-4 py-3 text-center">
+                  <div className="flex justify-center">
+                    <AdminActionMenu
+                      primary={["View", "Edit", "Delete"]}
+                      actions={[
+                        { label: "View", icon: <Eye className="h-3.5 w-3.5" />, onClick: () => setViewRefund(r) },
+                        { label: "Edit", icon: <Edit2 className="h-3.5 w-3.5" />, onClick: () => startEditRefund(r), variant: "warning", hidden: isViewer || !canModify, disabled: r.status === "processed" },
+                        { label: "Delete", icon: <Trash2 className="h-3.5 w-3.5" />, onClick: () => setDeleteRefund(r), variant: "destructive", hidden: isViewer || !canModify, disabled: r.status === "processed" },
+                        { label: "অনুমোদন", icon: <CheckCircle className="h-3.5 w-3.5" />, onClick: () => handleUpdateStatus(r.id, "approved"), variant: "success", hidden: isViewer || !canModify || r.status !== "pending", separator: true },
+                        { label: "বাতিল", icon: <XCircle className="h-3.5 w-3.5" />, onClick: () => handleUpdateStatus(r.id, "rejected"), variant: "destructive", hidden: isViewer || !canModify || r.status !== "pending" },
+                        { label: "প্রসেস", icon: <DollarSign className="h-3.5 w-3.5" />, onClick: () => handleUpdateStatus(r.id, "processed"), variant: "success", hidden: isViewer || !canModify || r.status !== "approved" },
+                      ]}
+                    />
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -291,9 +324,9 @@ export default function AdminRefundsPage() {
       </div>
 
       {/* Add Refund Modal */}
-      <Dialog open={showAddRefund} onOpenChange={setShowAddRefund}>
+      <Dialog open={showAddRefund} onOpenChange={(o) => { setShowAddRefund(o); if (!o) { setEditingRefundId(null); resetForm(); } }}>
         <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>নতুন রিফান্ড রিকুয়েস্ট</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editingRefundId ? "রিফান্ড সম্পাদনা" : "নতুন রিফান্ড রিকুয়েস্ট"}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1 block">বুকিং নির্বাচন করুন *</label>
@@ -358,9 +391,56 @@ export default function AdminRefundsPage() {
             </div>
 
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setShowAddRefund(false)}>বাতিল</Button>
-              <Button onClick={handleCreateRefund}><RotateCcw className="h-4 w-4 mr-1" /> রিফান্ড তৈরি</Button>
+              <Button variant="outline" onClick={() => { setShowAddRefund(false); setEditingRefundId(null); resetForm(); }}>বাতিল</Button>
+              <Button onClick={handleCreateRefund}><RotateCcw className="h-4 w-4 mr-1" /> {editingRefundId ? "আপডেট করুন" : "রিফান্ড তৈরি"}</Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* View */}
+      <Dialog open={!!viewRefund} onOpenChange={(o) => { if (!o) setViewRefund(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>রিফান্ড বিবরণ</DialogTitle></DialogHeader>
+          {viewRefund && (
+            <div className="space-y-2 text-sm">
+              <div className="grid grid-cols-2 gap-2">
+                <div><span className="text-xs text-muted-foreground block">ট্র্যাকিং</span><span className="font-mono">{viewRefund.bookings?.tracking_id || "—"}</span></div>
+                <div><span className="text-xs text-muted-foreground block">কাস্টমার</span><span className="font-medium">{viewRefund.bookings?.guest_name || "—"}</span></div>
+                <div><span className="text-xs text-muted-foreground block">প্যাকেজ</span><span>{viewRefund.bookings?.packages?.name || "—"}</span></div>
+                <div><span className="text-xs text-muted-foreground block">নীতিমালা</span><span>{viewRefund.cancellation_policies?.name || "—"}</span></div>
+                <div><span className="text-xs text-muted-foreground block">মূল পরিমাণ</span><span>{formatBDT(viewRefund.original_amount)}</span></div>
+                <div><span className="text-xs text-muted-foreground block">কর্তন</span><span className="text-destructive">{formatBDT(viewRefund.deduction_amount)}</span></div>
+                <div><span className="text-xs text-muted-foreground block">রিফান্ড</span><span className="font-bold">{formatBDT(viewRefund.refund_amount)}</span></div>
+                <div><span className="text-xs text-muted-foreground block">মাধ্যম</span><span className="capitalize">{viewRefund.refund_method || "—"}</span></div>
+                <div><span className="text-xs text-muted-foreground block">স্ট্যাটাস</span><Badge className={STATUS_COLORS[viewRefund.status] || ""}>{viewRefund.status}</Badge></div>
+                <div><span className="text-xs text-muted-foreground block">তৈরি</span><span>{viewRefund.created_at ? format(new Date(viewRefund.created_at), "dd/MM/yyyy") : "—"}</span></div>
+                {viewRefund.processed_at && (
+                  <div><span className="text-xs text-muted-foreground block">প্রসেস</span><span>{format(new Date(viewRefund.processed_at), "dd/MM/yyyy")}</span></div>
+                )}
+              </div>
+              {viewRefund.reason && (
+                <div className="pt-2 border-t border-border">
+                  <span className="text-xs text-muted-foreground block mb-1">কারণ</span>
+                  <p className="text-sm">{viewRefund.reason}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete confirmation */}
+      <Dialog open={!!deleteRefund} onOpenChange={(o) => { if (!o) setDeleteRefund(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>রিফান্ড মুছে ফেলবেন?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">{deleteRefund?.bookings?.guest_name || "এই"}</span>-এর
+            {" "}{formatBDT(deleteRefund?.refund_amount || 0)} টাকার রিফান্ড রিকুয়েস্টটি স্থায়ীভাবে মুছে যাবে। এটি ফেরানো যাবে না।
+          </p>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" size="sm" onClick={() => setDeleteRefund(null)}>থাক</Button>
+            <Button variant="destructive" size="sm" onClick={confirmDeleteRefund}>মুছে ফেলুন</Button>
           </div>
         </DialogContent>
       </Dialog>
