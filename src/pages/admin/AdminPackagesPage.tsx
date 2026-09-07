@@ -3,10 +3,11 @@ import { useSearchParams } from "react-router-dom";
 import { supabase } from "@/lib/api";
 import { supabase as supabaseClient } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { Plus, X, Edit2, Trash2, Save, ToggleLeft, ToggleRight, Upload, Loader2, Eye, Copy, ListChecks } from "lucide-react";
+import { Plus, X, Edit2, Trash2, Save, ToggleLeft, ToggleRight, Upload, Loader2, Eye, Copy, ListChecks, Handshake } from "lucide-react";
 import { useIsViewer } from "@/components/admin/AdminLayout";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import AdminActionMenu from "@/components/admin/AdminActionMenu";
+import PackageSupplierContractsDialog from "@/components/admin/PackageSupplierContractsDialog";
 
 const inputClass = "w-full bg-secondary border border-border rounded-md px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40";
 const TYPES = ["hajj", "umrah", "tour", "visa", "air_ticket", "hotel", "transport", "ziyara"];
@@ -33,6 +34,7 @@ export default function AdminPackagesPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [viewPkg, setViewPkg] = useState<any>(null);
+  const [contractsPkg, setContractsPkg] = useState<any>(null);
 
   const [typeFilter, setTypeFilter] = useState(urlType || "all");
 
@@ -368,6 +370,7 @@ export default function AdminPackagesPage() {
                   inlineCount={2}
                   actions={[
                     { label: "View", icon: <Eye className="h-3.5 w-3.5" />, onClick: () => setViewPkg(p) },
+                    { label: "Supplier Contracts", icon: <Handshake className="h-3.5 w-3.5" />, onClick: () => setContractsPkg(p), variant: "purple" },
                     { label: "Edit", icon: <Edit2 className="h-3.5 w-3.5" />, onClick: () => openEdit(p), variant: "warning", hidden: isViewer },
                     { label: "Delete", icon: <Trash2 className="h-3.5 w-3.5" />, onClick: () => setDeleteId(p.id), variant: "destructive", hidden: isViewer, separator: true },
                     { label: "Duplicate", icon: <Copy className="h-3.5 w-3.5" />, onClick: () => handleDuplicate(p), variant: "purple", hidden: isViewer },
@@ -380,6 +383,14 @@ export default function AdminPackagesPage() {
         ))}
         {filteredPackages.length === 0 && <p className="text-center text-muted-foreground py-12">No packages found.</p>}
       </div>
+
+      <PackageSupplierContractsDialog
+        packageId={contractsPkg?.id || null}
+        packageName={contractsPkg?.name}
+        open={!!contractsPkg}
+        onOpenChange={(o) => { if (!o) setContractsPkg(null); }}
+        readOnly={isViewer}
+      />
 
       {/* Create/Edit Modal */}
       <Dialog open={showForm} onOpenChange={(o) => { if (!o) closeModal(); }}>
