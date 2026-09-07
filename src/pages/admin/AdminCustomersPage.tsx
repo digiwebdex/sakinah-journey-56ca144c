@@ -132,9 +132,9 @@ export default function AdminCustomersPage() {
 
   const saveEdit = async () => {
     if (!editId) return;
-    const phoneErr = getPhoneError(editForm.phone || "", true);
+    const phoneErr = editForm.phone?.trim() ? getPhoneError(editForm.phone) : null;
     if (phoneErr) { toast.error(phoneErr); return; }
-    const normalizedPhone = normalizePhone(editForm.phone);
+    const normalizedPhone = editForm.phone?.trim() ? normalizePhone(editForm.phone) : null;
     const { error } = await supabase.from("profiles").update({
       full_name: editForm.full_name || null, phone: normalizedPhone,
       email: editForm.email || null, address: editForm.address || null,
@@ -157,19 +157,20 @@ export default function AdminCustomersPage() {
 
   const handleAddCustomer = async () => {
     if (!addForm.full_name.trim()) { toast.error("Name is required."); return; }
-    if (!addForm.phone.trim()) { toast.error("Phone number is required."); return; }
-    const phoneErr = getPhoneError(addForm.phone, true);
+    const phoneErr = addForm.phone.trim() ? getPhoneError(addForm.phone) : null;
     if (phoneErr) { toast.error(phoneErr); return; }
     setAddLoading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) { toast.error("Not authenticated"); return; }
       const cleanPhone = addForm.phone.trim().replace(/[^\d+]/g, "");
-      const { data: existing } = await supabase.from("profiles").select("id").eq("phone", cleanPhone).maybeSingle();
-      if (existing) { toast.error("A customer with this phone number already exists"); setAddLoading(false); return; }
+      if (cleanPhone) {
+        const { data: existing } = await supabase.from("profiles").select("id").eq("phone", cleanPhone).maybeSingle();
+        if (existing) { toast.error("A customer with this phone number already exists"); setAddLoading(false); return; }
+      }
       const newUserId = crypto.randomUUID();
       const { error } = await supabase.from("profiles").insert({
-        user_id: newUserId, full_name: addForm.full_name.trim(), phone: cleanPhone,
+        user_id: newUserId, full_name: addForm.full_name.trim(), phone: cleanPhone || null,
         email: addForm.email.trim() || null, address: addForm.address.trim() || null,
         passport_number: addForm.passport_number.trim() || null, nid_number: addForm.nid_number.trim() || null,
         date_of_birth: addForm.date_of_birth || null, emergency_contact: addForm.emergency_contact.trim() || null,
@@ -394,9 +395,9 @@ export default function AdminCustomersPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div><label className="text-xs text-muted-foreground block mb-1">Name *</label>
                 <input className={inputClass} value={editForm.full_name} onChange={e => setEditForm({ ...editForm, full_name: e.target.value })} /></div>
-              <div><label className="text-xs text-muted-foreground block mb-1">Phone *</label>
-                <input className={inputClass} value={editForm.phone} onChange={e => handlePhoneChange(e.target.value, v => setEditForm({ ...editForm, phone: v }))} placeholder="01XXXXXXXXX" maxLength={15} required />
-                {getPhoneError(editForm.phone || "", true) && <p className="text-xs text-destructive mt-1">{getPhoneError(editForm.phone || "", true)}</p>}</div>
+              <div><label className="text-xs text-muted-foreground block mb-1">Phone</label>
+                <input className={inputClass} value={editForm.phone} onChange={e => handlePhoneChange(e.target.value, v => setEditForm({ ...editForm, phone: v }))} placeholder="01XXXXXXXXX" maxLength={15} />
+                {editForm.phone?.trim() && getPhoneError(editForm.phone) && <p className="text-xs text-destructive mt-1">{getPhoneError(editForm.phone)}</p>}</div>
               <div><label className="text-xs text-muted-foreground block mb-1">Email</label>
                 <input className={inputClass} type="email" value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} /></div>
               <div><label className="text-xs text-muted-foreground block mb-1">Passport No.</label>
@@ -431,7 +432,7 @@ export default function AdminCustomersPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div><label className="text-xs text-muted-foreground block mb-1">Name *</label>
                 <input className={inputClass} value={addForm.full_name} onChange={e => setAddForm({ ...addForm, full_name: e.target.value })} placeholder="Full Name" /></div>
-              <div><label className="text-xs text-muted-foreground block mb-1">Phone *</label>
+              <div><label className="text-xs text-muted-foreground block mb-1">Phone</label>
                 <input className={inputClass} value={addForm.phone} onChange={e => handlePhoneChange(e.target.value, v => setAddForm({ ...addForm, phone: v }))} placeholder="01XXXXXXXXX" maxLength={15} />
                 {addForm.phone?.trim() && getPhoneError(addForm.phone) && <p className="text-xs text-destructive mt-1">{getPhoneError(addForm.phone)}</p>}</div>
               <div><label className="text-xs text-muted-foreground block mb-1">Email</label>
