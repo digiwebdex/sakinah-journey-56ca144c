@@ -333,6 +333,7 @@ export const auth = {
 // Table name mapping (kebab-case for URLs)
 // =============================================
 const tableUrlMap: Record<string, string> = {
+  package_supplier_contracts: '/package-supplier-contracts',
   bookings: '/bookings',
   payments: '/payments',
   expenses: '/expenses',

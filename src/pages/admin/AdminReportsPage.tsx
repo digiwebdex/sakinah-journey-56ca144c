@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   CalendarIcon, FileDown, FileSpreadsheet, ChevronDown, ChevronUp, Users,
   TrendingUp, TrendingDown, DollarSign, Filter, Search, Package, Building2,
-  BarChart3, Briefcase, ClipboardList, CreditCard, Layers, PieChart
+  BarChart3, Briefcase, ClipboardList, CreditCard, Layers, PieChart, Handshake
 } from "lucide-react";
 import {
   format, parseISO, getYear, getMonth, isWithinInterval,
@@ -22,6 +22,7 @@ import { formatBDT, cn } from "@/lib/utils";
 import { exportPDF, exportExcel } from "@/lib/reportExport";
 import { useCanSeeProfit } from "@/components/admin/AdminLayout";
 import PackageProfitReportTab from "@/components/admin/PackageProfitReportTab";
+import PackageSupplierReportTab from "@/components/admin/PackageSupplierReportTab";
 import ServiceProfitReportTab from "@/components/admin/ServiceProfitReportTab";
 import { buildMonthlyPackageRows, buildPackageProfitReport, summarizePackageProfit } from "@/lib/packageProfitReport";
 import {
@@ -45,6 +46,7 @@ export default function AdminReportsPage() {
   const [supplierAgents, setSupplierAgents] = useState<any[]>([]);
   const [supplierPayments, setSupplierPayments] = useState<any[]>([]);
   const [packages, setPackages] = useState<any[]>([]);
+  const [packageContracts, setPackageContracts] = useState<any[]>([]);
   const [supplierContracts, setSupplierContracts] = useState<any[]>([]);
   const [supplierContractPayments, setSupplierContractPayments] = useState<any[]>([]);
   const [dailyCashbook, setDailyCashbook] = useState<any[]>([]);
@@ -77,7 +79,8 @@ export default function AdminReportsPage() {
       supabase.from("supplier_contracts").select("*").order("created_at", { ascending: false }),
       supabase.from("supplier_contract_payments").select("*").order("payment_date", { ascending: false }),
       supabase.from("daily_cashbook").select("*").order("date", { ascending: false }),
-    ]).then(([bk, py, ex, pr, ml, mp, cp, sa, sp, pk, sc, scp, dc]) => {
+      supabase.from("package_supplier_contracts").select("*"),
+    ]).then(([bk, py, ex, pr, ml, mp, cp, sa, sp, pk, sc, scp, dc, psc]) => {
       setBookings(bk.data || []);
       setPayments(py.data || []);
       setExpenses(ex.data || []);
@@ -91,6 +94,7 @@ export default function AdminReportsPage() {
       setSupplierContracts(sc.data || []);
       setSupplierContractPayments(scp.data || []);
       setDailyCashbook(dc.data || []);
+      setPackageContracts(psc.data || []);
     });
   }, []);
 
@@ -689,6 +693,7 @@ export default function AdminReportsPage() {
     { value: "customer", label: "Customer Wise", icon: Users },
     { value: "package", label: "Package Wise", icon: Package },
     { value: "package_profit", label: "Package P&L", icon: PieChart },
+    { value: "package_supplier", label: "Package Supplier", icon: Handshake },
     { value: "moallem", label: "Moallem Wise", icon: Briefcase },
     { value: "supplier", label: "Supplier Agent", icon: Building2 },
     { value: "supplier_contract", label: "Supplier Contract", icon: FileDown },
@@ -698,7 +703,7 @@ export default function AdminReportsPage() {
 
   const needsDateFilter = activeTab !== "financial";
   const needsSearch = !["financial", "daily"].includes(activeTab);
-  const needsPackageFilter = ["customer", "moallem", "supplier", "daily", "package_profit"].includes(activeTab);
+  const needsPackageFilter = ["customer", "moallem", "supplier", "daily", "package_profit", "package_supplier"].includes(activeTab);
   const needsStatusFilter = ["customer", "moallem", "supplier", "daily"].includes(activeTab);
 
   return (
@@ -1162,6 +1167,25 @@ export default function AdminReportsPage() {
             moallemPayments={moallemPayments}
             commissionPayments={commissionPayments}
             supplierPayments={supplierPayments}
+            moallemMap={moallemMap}
+            supplierMap={supplierMap}
+            canSeeProfit={canSeeProfit}
+            searchQuery={searchQuery}
+          />
+        </TabsContent>
+
+        {/* ═══════════════════════════════════════
+            PACKAGE-WISE SUPPLIER SETTLEMENT TAB
+        ═══════════════════════════════════════ */}
+        <TabsContent value="package_supplier">
+          <PackageSupplierReportTab
+            packages={packages}
+            bookings={bookings}
+            expenses={expenses}
+            moallemPayments={moallemPayments}
+            commissionPayments={commissionPayments}
+            supplierPayments={supplierPayments}
+            packageContracts={packageContracts}
             moallemMap={moallemMap}
             supplierMap={supplierMap}
             canSeeProfit={canSeeProfit}

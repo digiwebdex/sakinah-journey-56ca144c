@@ -91,6 +91,25 @@ async function runBootMigrations() {
     $$
   `);
 
+  // Per-package supplier contracts: what a supplier is owed for one package,
+  // agreed up front, independent of individual pilgrim bookings.
+  await query(`
+    CREATE TABLE IF NOT EXISTS package_supplier_contracts (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      package_id UUID NOT NULL REFERENCES packages(id) ON DELETE CASCADE,
+      supplier_agent_id UUID NOT NULL REFERENCES supplier_agents(id) ON DELETE CASCADE,
+      contract_amount NUMERIC NOT NULL DEFAULT 0,
+      contracted_pax INTEGER NOT NULL DEFAULT 0,
+      notes TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (package_id, supplier_agent_id)
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_psc_package ON package_supplier_contracts(package_id)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_psc_supplier ON package_supplier_contracts(supplier_agent_id)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_sap_package ON supplier_agent_payments(package_id)`);
+
   await applyPaymentLedgerFixes();
   await applyFinanceUpdateLedgerFixes();
 

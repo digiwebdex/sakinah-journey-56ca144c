@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/api";
+import { unpaidPaxFor } from "@/lib/packageSupplierSummary";
 import { toast } from "sonner";
 import { Download, Edit2, Trash2, Save, X, Plus, Wallet, Search, CheckCircle, XCircle, Upload, FileText, Loader2, FileDown, FileSpreadsheet, ChevronDown, ChevronRight } from "lucide-react";
 import { exportPDF, exportExcel } from "@/lib/reportExport";
@@ -78,6 +79,7 @@ export default function AdminPaymentsPage() {
   });
   const [allBookings, setAllBookings] = useState<any[]>([]);
   const [activePackages, setActivePackages] = useState<any[]>([]);
+  const [packageContracts, setPackageContracts] = useState<any[]>([]);
   const [moallems, setMoallems] = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [paymentType, setPaymentType] = useState<PaymentType>("customer");
@@ -134,18 +136,45 @@ export default function AdminPaymentsPage() {
     setShowAddModal(true);
     setPaymentType("customer");
     resetAddForm();
-    const [{ data: moallemData }, { data: supplierData }, { data: bookingsData }, { data: packagesData }] = await Promise.all([
+    const [{ data: moallemData }, { data: supplierData }, { data: bookingsData }, { data: packagesData }, { data: contractsData }] = await Promise.all([
       supabase.from("moallems").select("id, name, phone, total_due, total_deposit").eq("status", "active").order("name"),
       supabase.from("supplier_agents").select("id, agent_name, company_name, phone").eq("status", "active").order("agent_name"),
       supabase.from("bookings").select("id, tracking_id, total_amount, paid_amount, due_amount, paid_by_moallem, moallem_due, total_cost, paid_to_supplier, supplier_due, guest_name, guest_phone, guest_passport, user_id, moallem_id, supplier_agent_id, status, packages(name, type)").order("created_at", { ascending: false }),
       supabase.from("packages").select("id, name, type, price, duration_days, is_active").eq("is_active", true).order("name"),
+      supabase.from("package_supplier_contracts").select("*"),
     ]);
     setMoallems(moallemData || []);
     setSuppliers(supplierData || []);
     setAllBookings(bookingsData || []);
     setActivePackages(packagesData || []);
+    setPackageContracts(contractsData || []);
     await refreshWallets();
   };
+
+  // What this package owes its suppliers, so the amount can be judged before paying.
+  const supplierPackageInfo = useMemo(() => {
+    if (paymentType !== "supplier" || !addForm.package_id) return null;
+    const pkgContracts = packageContracts.filter((c: any) => c.package_id === addForm.package_id);
+    const paidFor = (supplierId?: string) => supplierPayments
+      .filter((p: any) => p.package_id === addForm.package_id && (!supplierId || p.supplier_agent_id === supplierId))
+      .reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
+
+    const contractTotal = pkgContracts.reduce((sum: number, c: any) => sum + Number(c.contract_amount || 0), 0);
+    const paidTotal = paidFor();
+    const mine = addForm.supplier_id ? pkgContracts.find((c: any) => c.supplier_agent_id === addForm.supplier_id) : null;
+    const myContract = mine ? Number(mine.contract_amount || 0) : 0;
+    const myPax = mine ? Number(mine.contracted_pax || 0) : 0;
+    const myPaid = addForm.supplier_id ? paidFor(addForm.supplier_id) : 0;
+    const myDue = myContract - myPaid;
+
+    return {
+      hasContract: !!mine,
+      supplierChosen: !!addForm.supplier_id,
+      contractTotal, paidTotal, dueTotal: contractTotal - paidTotal,
+      myContract, myPaid, myDue, myPax,
+      myUnpaidPax: unpaidPaxFor(myContract, myPax, myDue),
+    };
+  }, [paymentType, addForm.package_id, addForm.supplier_id, packageContracts, supplierPayments]);
 
   const resetAddForm = () => {
     setAddForm({ customer_id: "", booking_id: "", amount: "", payment_method: "cash", transaction_id: "", paid_date: new Date().toISOString().split("T")[0], notes: "", wallet_account_id: "", moallem_id: "", supplier_id: "", service_type: "", package_id: "" });
@@ -876,6 +905,49 @@ export default function AdminPaymentsPage() {
                 </select>
                 {activePackages.length === 0 && (
                   <p className="text-xs text-muted-foreground mt-1">No active packages found.</p>
+                )}
+
+                {supplierPackageInfo && (
+                  <div className="mt-2 rounded-lg border border-border bg-secondary/40 p-2">
+                    {supplierPackageInfo.supplierChosen && supplierPackageInfo.hasContract ? (
+                      <>
+                        <div className="grid grid-cols-3 gap-2 text-center">
+                          <div>
+                            <span className="text-[10px] uppercase text-muted-foreground block">Contract</span>
+                            <span className="font-bold text-sm">{formatBDT(supplierPackageInfo.myContract)}</span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] uppercase text-muted-foreground block">Paid</span>
+                            <span className="font-bold text-sm text-emerald-600">{formatBDT(supplierPackageInfo.myPaid)}</span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] uppercase text-muted-foreground block">Due</span>
+                            <span className={`font-bold text-sm ${supplierPackageInfo.myDue > 0 ? "text-destructive" : "text-emerald-600"}`}>
+                              {formatBDT(supplierPackageInfo.myDue)}
+                            </span>
+                          </div>
+                        </div>
+                        {supplierPackageInfo.myPax > 0 && (
+                          <p className="text-[11px] text-muted-foreground mt-1 text-center">
+                            {supplierPackageInfo.myUnpaidPax} of {supplierPackageInfo.myPax} pilgrims still unpaid on this contract
+                          </p>
+                        )}
+                        {Number(addForm.amount) > supplierPackageInfo.myDue && supplierPackageInfo.myDue >= 0 && Number(addForm.amount) > 0 && (
+                          <p className="text-[11px] text-destructive mt-1 text-center">
+                            This is more than the {formatBDT(supplierPackageInfo.myDue)} still due on the contract.
+                          </p>
+                        )}
+                      </>
+                    ) : supplierPackageInfo.supplierChosen ? (
+                      <p className="text-[11px] text-muted-foreground text-center">
+                        No contract set for this supplier on this package. Set it in Packages &rarr; Supplier Contracts to track the due amount.
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-muted-foreground text-center">
+                        Package total: contract {formatBDT(supplierPackageInfo.contractTotal)} &middot; paid {formatBDT(supplierPackageInfo.paidTotal)} &middot; due {formatBDT(supplierPackageInfo.dueTotal)}
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             )}

@@ -637,6 +637,7 @@ app.get('/api/supplier-agent-payments', authenticate, async (req, res) => {
 app.use('/api/supplier-agent-payments', createCrudRoutes('supplier_agent_payments', { adminOnly: true }));
 app.use('/api/supplier-agent-items', createCrudRoutes('supplier_agent_items', { adminOnly: true }));
 app.use('/api/supplier-contracts', createCrudRoutes('supplier_contracts', { adminOnly: true }));
+app.use('/api/package-supplier-contracts', createCrudRoutes('package_supplier_contracts', { adminOnly: true }));
 app.use('/api/supplier-contract-payments', createCrudRoutes('supplier_contract_payments', { adminOnly: true }));
 app.use('/api/booking-members', createCrudRoutes('booking_members', { adminOnly: true }));
 app.use('/api/booking-documents', createCrudRoutes('booking_documents', { readAuth: true, writeAuth: false }));
