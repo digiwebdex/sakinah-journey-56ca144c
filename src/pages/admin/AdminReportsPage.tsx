@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   CalendarIcon, FileDown, FileSpreadsheet, ChevronDown, ChevronUp, Users,
   TrendingUp, TrendingDown, DollarSign, Filter, Search, Package, Building2,
-  BarChart3, Briefcase, ClipboardList, CreditCard, Layers, Ticket, Globe, Plane
+  BarChart3, Briefcase, ClipboardList, CreditCard, Layers, PieChart
 } from "lucide-react";
 import {
   format, parseISO, getYear, getMonth, isWithinInterval,
@@ -21,6 +21,15 @@ import {
 import { formatBDT, cn } from "@/lib/utils";
 import { exportPDF, exportExcel } from "@/lib/reportExport";
 import { useCanSeeProfit } from "@/components/admin/AdminLayout";
+import PackageProfitReportTab from "@/components/admin/PackageProfitReportTab";
+import ServiceProfitReportTab from "@/components/admin/ServiceProfitReportTab";
+import { buildMonthlyPackageRows, buildPackageProfitReport, summarizePackageProfit } from "@/lib/packageProfitReport";
+import {
+  buildServiceProfitReport,
+  formatServiceTableRows,
+  summarizeServiceProfit,
+  SERVICE_CATEGORIES,
+} from "@/lib/serviceProfitReport";
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
@@ -63,7 +72,7 @@ export default function AdminReportsPage() {
       supabase.from("moallem_payments").select("*").order("date", { ascending: false }),
       supabase.from("moallem_commission_payments").select("*").order("date", { ascending: false }),
       supabase.from("supplier_agents").select("*"),
-      supabase.from("supplier_agent_payments").select("*").order("date", { ascending: false }),
+      supabase.from("supplier_agent_payments").select("*, packages:package_id(name, type)").order("date", { ascending: false }),
       supabase.from("packages").select("*"),
       supabase.from("supplier_contracts").select("*").order("created_at", { ascending: false }),
       supabase.from("supplier_contract_payments").select("*").order("payment_date", { ascending: false }),
@@ -102,6 +111,15 @@ export default function AdminReportsPage() {
     supplierAgents.forEach((sa) => { m[sa.id] = sa; });
     return m;
   }, [supplierAgents]);
+
+  const packageMap = useMemo(() => {
+    const m: Record<string, any> = {};
+    packages.forEach((pkg) => { m[pkg.id] = pkg; });
+    return m;
+  }, [packages]);
+
+  const getSupplierPaymentPackageName = (payment: any) =>
+    payment?.packages?.name || packageMap[payment?.package_id]?.name || "-";
 
   const years = useMemo(() => {
     const s = new Set<number>();
@@ -287,37 +305,6 @@ export default function AdminReportsPage() {
   }, [filteredBookings, expenses, searchQuery]);
 
   // ══════════════════════════════════════════════
-  //  SERVICE TYPE REPORT (Hajj, Umrah, Air Ticket, Visa, Tour)
-  // ══════════════════════════════════════════════
-  const serviceTypeRows = useMemo(() => {
-    const map: Record<string, any> = {};
-    filteredBookings.forEach(b => {
-      const type = b.packages?.type || "other";
-      if (!map[type]) map[type] = { type, totalBookings: 0, travelers: 0, totalSelling: 0, totalCost: 0, totalPaid: 0, totalDue: 0, totalExpenses: 0, bookingDetails: [] };
-      map[type].totalBookings++;
-      map[type].travelers += Number(b.num_travelers || 1);
-      map[type].totalSelling += Number(b.total_amount || 0);
-      map[type].totalCost += Number(b.total_cost || 0);
-      map[type].totalPaid += Number(b.paid_amount || 0);
-      map[type].totalDue += Number(b.due_amount || 0);
-      map[type].bookingDetails.push({
-        trackingId: b.tracking_id, guestName: b.guest_name || "-",
-        packageName: b.packages?.name || "-",
-        total: Number(b.total_amount), paid: Number(b.paid_amount),
-        due: Number(b.due_amount || 0), status: b.status,
-        date: format(parseISO(b.created_at), "dd MMM yyyy"),
-      });
-    });
-    expenses.filter(e => e.package_id).forEach(e => {
-      const pkg = packages.find(p => p.id === e.package_id);
-      if (pkg && map[pkg.type]) map[pkg.type].totalExpenses += Number(e.amount);
-    });
-    return Object.values(map)
-      .map((d: any) => ({ ...d, profit: d.totalSelling - d.totalCost - d.totalExpenses }))
-      .sort((a: any, b: any) => b.totalSelling - a.totalSelling);
-  }, [filteredBookings, expenses, packages]);
-
-  // ══════════════════════════════════════════════
   //  MOALLEM REPORT
   // ══════════════════════════════════════════════
   const moallemRows = useMemo(() => {
@@ -394,6 +381,7 @@ export default function AdminReportsPage() {
         map[sp.supplier_agent_id].paymentDetails.push({
           amount: Number(sp.amount), date: format(parseISO(sp.date), "dd MMM yyyy"),
           method: sp.payment_method || "cash", notes: sp.notes || "-",
+          packageName: getSupplierPaymentPackageName(sp),
         });
       }
     });
@@ -401,7 +389,7 @@ export default function AdminReportsPage() {
     return Object.values(map)
       .filter((r: any) => !q || r.name.toLowerCase().includes(q) || (r.company && r.company.toLowerCase().includes(q)))
       .sort((a: any, b: any) => b.totalCost - a.totalCost);
-  }, [filteredBookings, supplierPayments, supplierMap, profileMap, dateInterval, searchQuery]);
+  }, [filteredBookings, supplierPayments, supplierMap, profileMap, dateInterval, searchQuery, packageMap]);
 
   // ══════════════════════════════════════════════
   //  SUPPLIER CONTRACT REPORT
@@ -504,7 +492,8 @@ export default function AdminReportsPage() {
       try { if (!isWithinInterval(parseISO(sp.date), dateInterval)) return; } catch { return; }
       rows.push({
         source: "Supplier Agent", name: supplierMap[sp.supplier_agent_id]?.agent_name || "-",
-        trackingId: "-", amount: Number(sp.amount), method: sp.payment_method || "cash",
+        trackingId: getSupplierPaymentPackageName(sp),
+        amount: Number(sp.amount), method: sp.payment_method || "cash",
         date: format(parseISO(sp.date), "dd MMM yyyy"), type: "expense",
       });
     });
@@ -531,7 +520,7 @@ export default function AdminReportsPage() {
     return rows
       .filter(r => !q || r.name.toLowerCase().includes(q) || r.source.toLowerCase().includes(q))
       .sort((a, b) => b.date.localeCompare(a.date));
-  }, [payments, moallemPayments, supplierPayments, commissionPayments, supplierContractPayments, supplierContracts, bookings, moallemMap, supplierMap, dateInterval, searchQuery]);
+  }, [payments, moallemPayments, supplierPayments, commissionPayments, supplierContractPayments, supplierContracts, bookings, moallemMap, supplierMap, packageMap, dateInterval, searchQuery]);
 
   // ══════════════════════════════════════════════
   //  COMMISSION REPORT
@@ -593,6 +582,29 @@ export default function AdminReportsPage() {
         data = { title: "Customer Report", columns: ["Name", "Phone", "Travelers", "Total Amount", "Total Paid", "Total Due"], rows: customerRows.map((r: any) => [r.name, r.phone, r.travelers, r.totalAmount, r.totalPaid, r.totalDue]), summary: makeSummary(totalPaid, totalDue) };
         break;
       }
+      case "package_profit": {
+        const profitRows = buildPackageProfitReport({
+          packages, bookings, payments, expenses, moallemPayments, commissionPayments, supplierPayments, moallemMap, supplierMap,
+        }, {
+          month: getMonth(new Date()),
+          year: getYear(new Date()),
+          packageId: filterPackage,
+          serviceType: filterServiceType,
+          searchQuery,
+        });
+        const profitSummary = summarizePackageProfit(profitRows);
+        data = {
+          title: "Package Sales & Profit Report",
+          columns: ["Package", "Bookings", "Revenue", "Expenses", "Profit", "Margin %"],
+          rows: buildMonthlyPackageRows(profitRows).map((r) => [r.package, r.bookings, r.revenue, r.expenses, r.profit, `${r.margin.toFixed(1)}%`]),
+          summary: [
+            `Total Sales: BDT ${profitSummary.totalSales.toLocaleString("en-IN")}`,
+            `Total Expenses: BDT ${profitSummary.totalExpenses.toLocaleString("en-IN")}`,
+            `Total Profit: BDT ${profitSummary.totalProfit.toLocaleString("en-IN")}`,
+          ],
+        };
+        break;
+      }
       case "package": {
         const cols = canSeeProfit ? ["Package","Type","Travelers","Total Selling","Total Cost","Profit"] : ["Package","Type","Travelers","Total Selling"];
         const rows = packageRows.map((r: any) => canSeeProfit ? [r.name, r.type, r.totalHajji, r.totalSelling, r.totalCost, r.profit] : [r.name, r.type, r.totalHajji, r.totalSelling]);
@@ -600,9 +612,26 @@ export default function AdminReportsPage() {
         break;
       }
       case "service_type": {
-        const cols = canSeeProfit ? ["Service Type","Bookings","Travelers","Total Selling","Total Cost","Profit"] : ["Service Type","Bookings","Travelers","Total Selling"];
-        const rows = serviceTypeRows.map((r: any) => canSeeProfit ? [r.type, r.totalBookings, r.travelers, r.totalSelling, r.totalCost, r.profit] : [r.type, r.totalBookings, r.travelers, r.totalSelling]);
-        data = { title: "Service Type Report", columns: cols, rows };
+        const serviceRows = buildServiceProfitReport({
+          packages, bookings, expenses, moallemPayments, commissionPayments, supplierPayments,
+        }, {
+          month: getMonth(new Date()),
+          year: getYear(new Date()),
+          serviceKey: "all",
+          searchQuery,
+        });
+        const serviceSummary = summarizeServiceProfit(serviceRows);
+        data = {
+          title: "Service Revenue & Profit Report",
+          columns: ["Service", "Bookings", "Revenue", "Expenses", "Profit", "Margin %"],
+          rows: formatServiceTableRows(serviceRows).map((r) => [r.service, r.bookings, r.revenue, r.expense, r.profit, `${r.margin.toFixed(1)}%`]),
+          summary: [
+            ...SERVICE_CATEGORIES.map((s) => `${s.label} Revenue: BDT ${serviceSummary.byService[s.key].revenue.toLocaleString("en-IN")}`),
+            `Total Expenses: BDT ${serviceSummary.totalExpenses.toLocaleString("en-IN")}`,
+            `Net Profit: BDT ${serviceSummary.netProfit.toLocaleString("en-IN")}`,
+            `Best Service: ${serviceSummary.bestService}`,
+          ],
+        };
         break;
       }
       case "moallem": {
@@ -656,9 +685,10 @@ export default function AdminReportsPage() {
   const tabItems = [
     { value: "financial", label: "Financial Summary", icon: BarChart3 },
     { value: "daily", label: "Daily Booking", icon: ClipboardList },
-    { value: "service_type", label: "Service Type", icon: Layers },
+    { value: "service_type", label: "Service P&L", icon: Layers },
     { value: "customer", label: "Customer Wise", icon: Users },
     { value: "package", label: "Package Wise", icon: Package },
+    { value: "package_profit", label: "Package P&L", icon: PieChart },
     { value: "moallem", label: "Moallem Wise", icon: Briefcase },
     { value: "supplier", label: "Supplier Agent", icon: Building2 },
     { value: "supplier_contract", label: "Supplier Contract", icon: FileDown },
@@ -668,7 +698,7 @@ export default function AdminReportsPage() {
 
   const needsDateFilter = activeTab !== "financial";
   const needsSearch = !["financial", "daily"].includes(activeTab);
-  const needsPackageFilter = ["customer", "moallem", "supplier", "daily"].includes(activeTab);
+  const needsPackageFilter = ["customer", "moallem", "supplier", "daily", "package_profit"].includes(activeTab);
   const needsStatusFilter = ["customer", "moallem", "supplier", "daily"].includes(activeTab);
 
   return (
@@ -763,7 +793,7 @@ export default function AdminReportsPage() {
               </Select>
             </>
           )}
-          {(activeTab === "service_type" || activeTab === "package") && serviceTypes.length > 0 && (
+          {(activeTab === "package" || activeTab === "package_profit") && serviceTypes.length > 0 && (
             <Select value={filterServiceType} onValueChange={setFilterServiceType}>
               <SelectTrigger className="w-[150px] h-9 text-xs"><SelectValue placeholder="All Types" /></SelectTrigger>
               <SelectContent>
@@ -953,74 +983,18 @@ export default function AdminReportsPage() {
         </TabsContent>
 
         {/* ═══════════════════════════════════════
-            SERVICE TYPE TAB
+            SERVICE P&L TAB
         ═══════════════════════════════════════ */}
         <TabsContent value="service_type">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-            <SummaryCard label="Service Types" value={serviceTypeRows.length} icon={Layers} color="text-foreground" />
-            <SummaryCard label="Total Bookings" value={serviceTypeRows.reduce((s: number, r: any) => s + r.totalBookings, 0)} icon={ClipboardList} color="text-primary" />
-            <SummaryCard label="Total Selling" value={formatBDT(serviceTypeRows.reduce((s: number, r: any) => s + r.totalSelling, 0))} icon={TrendingUp} color="text-primary" />
-            <SummaryCard label="Total Due" value={formatBDT(serviceTypeRows.reduce((s: number, r: any) => s + r.totalDue, 0))} icon={TrendingDown} color="text-destructive" />
-          </div>
-          <ExpandableReportTable
-            rows={serviceTypeRows}
-            headers={canSeeProfit ? ["", "Service Type", "Bookings", "Travelers", "Total Selling", "Total Paid", "Total Due", "Profit"] : ["", "Service Type", "Bookings", "Travelers", "Total Selling", "Total Paid", "Total Due"]}
-            renderRow={(r: any) => (
-              <>
-                <TableCell className="font-medium">
-                  <div className="flex items-center gap-2">
-                    <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                      {r.type === "hajj" ? <Globe className="h-3.5 w-3.5 text-primary" /> :
-                       r.type === "umrah" ? <Globe className="h-3.5 w-3.5 text-primary" /> :
-                       r.type === "air_ticket" ? <Plane className="h-3.5 w-3.5 text-primary" /> :
-                       r.type === "visa" ? <Ticket className="h-3.5 w-3.5 text-primary" /> :
-                       <Layers className="h-3.5 w-3.5 text-primary" />}
-                    </div>
-                    <span className="capitalize">{r.type.replace(/_/g, " ")}</span>
-                  </div>
-                </TableCell>
-                <TableCell className="text-right">{r.totalBookings}</TableCell>
-                <TableCell className="text-right">{r.travelers}</TableCell>
-                <TableCell className="text-right font-medium">{formatBDT(r.totalSelling)}</TableCell>
-                <TableCell className="text-right text-primary font-medium">{formatBDT(r.totalPaid)}</TableCell>
-                <TableCell className="text-right text-destructive font-medium">{formatBDT(r.totalDue)}</TableCell>
-                {canSeeProfit && <TableCell className={cn("text-right font-bold", r.profit >= 0 ? "text-primary" : "text-destructive")}>{formatBDT(r.profit)}</TableCell>}
-              </>
-            )}
-            renderExpanded={(r: any) => (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Tracking ID</TableHead><TableHead>Guest</TableHead><TableHead>Package</TableHead>
-                    <TableHead className="text-right">Amount</TableHead><TableHead className="text-right">Paid</TableHead>
-                    <TableHead className="text-right">Due</TableHead><TableHead>Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {r.bookingDetails.map((bd: any, j: number) => (
-                    <TableRow key={j}>
-                      <TableCell className="font-mono text-xs text-primary">{bd.trackingId}</TableCell>
-                      <TableCell>{bd.guestName}</TableCell><TableCell>{bd.packageName}</TableCell>
-                      <TableCell className="text-right">{formatBDT(bd.total)}</TableCell>
-                      <TableCell className="text-right text-primary">{formatBDT(bd.paid)}</TableCell>
-                      <TableCell className="text-right text-destructive">{formatBDT(bd.due)}</TableCell>
-                      <TableCell><StatusBadge status={bd.status} /></TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-            totalRow={
-              <>
-                <TableCell className="font-bold">Total</TableCell>
-                <TableCell className="text-right font-bold">{serviceTypeRows.reduce((s: number, r: any) => s + r.totalBookings, 0)}</TableCell>
-                <TableCell className="text-right font-bold">{serviceTypeRows.reduce((s: number, r: any) => s + r.travelers, 0)}</TableCell>
-                <TableCell className="text-right font-bold">{formatBDT(serviceTypeRows.reduce((s: number, r: any) => s + r.totalSelling, 0))}</TableCell>
-                <TableCell className="text-right font-bold text-primary">{formatBDT(serviceTypeRows.reduce((s: number, r: any) => s + r.totalPaid, 0))}</TableCell>
-                <TableCell className="text-right font-bold text-destructive">{formatBDT(serviceTypeRows.reduce((s: number, r: any) => s + r.totalDue, 0))}</TableCell>
-                {canSeeProfit && <TableCell className={cn("text-right font-bold", serviceTypeRows.reduce((s: number, r: any) => s + r.profit, 0) >= 0 ? "text-primary" : "text-destructive")}>{formatBDT(serviceTypeRows.reduce((s: number, r: any) => s + r.profit, 0))}</TableCell>}
-              </>
-            }
+          <ServiceProfitReportTab
+            packages={packages}
+            bookings={bookings}
+            expenses={expenses}
+            moallemPayments={moallemPayments}
+            commissionPayments={commissionPayments}
+            supplierPayments={supplierPayments}
+            canSeeProfit={canSeeProfit}
+            searchQuery={searchQuery}
           />
         </TabsContent>
 
@@ -1173,6 +1147,25 @@ export default function AdminReportsPage() {
                 {canSeeProfit && <TableCell className={cn("text-right font-bold", packageRows.reduce((s: number, r: any) => s + r.profit, 0) >= 0 ? "text-primary" : "text-destructive")}>{formatBDT(packageRows.reduce((s: number, r: any) => s + r.profit, 0))}</TableCell>}
               </>
             }
+          />
+        </TabsContent>
+
+        {/* ═══════════════════════════════════════
+            PACKAGE SALES & PROFIT TAB
+        ═══════════════════════════════════════ */}
+        <TabsContent value="package_profit">
+          <PackageProfitReportTab
+            packages={packages}
+            bookings={bookings}
+            payments={payments}
+            expenses={expenses}
+            moallemPayments={moallemPayments}
+            commissionPayments={commissionPayments}
+            supplierPayments={supplierPayments}
+            moallemMap={moallemMap}
+            supplierMap={supplierMap}
+            canSeeProfit={canSeeProfit}
+            searchQuery={searchQuery}
           />
         </TabsContent>
 
@@ -1332,11 +1325,12 @@ export default function AdminReportsPage() {
                     <p className="text-xs font-semibold text-muted-foreground mb-2">Payment History</p>
                     <table className="w-full text-sm">
                       <thead><tr className="text-left text-muted-foreground border-b border-border/50">
-                        <th className="pb-2 pr-3">Date</th><th className="pb-2 pr-3 text-right">Amount</th><th className="pb-2 pr-3">Method</th><th className="pb-2">Notes</th>
+                        <th className="pb-2 pr-3">Package</th><th className="pb-2 pr-3">Date</th><th className="pb-2 pr-3 text-right">Amount</th><th className="pb-2 pr-3">Method</th><th className="pb-2">Notes</th>
                       </tr></thead>
                       <tbody>
                         {r.paymentDetails.map((pd: any, j: number) => (
                           <tr key={j} className="border-b border-border/30">
+                            <td className="py-2 pr-3 font-medium">{pd.packageName || "-"}</td>
                             <td className="py-2 pr-3 text-muted-foreground">{pd.date}</td>
                             <td className="py-2 pr-3 text-right text-primary font-medium">{formatBDT(pd.amount)}</td>
                             <td className="py-2 pr-3 capitalize">{pd.method}</td>
@@ -1481,7 +1475,7 @@ export default function AdminReportsPage() {
                   <TableRow>
                     <TableHead>Source</TableHead>
                     <TableHead>Name</TableHead>
-                    <TableHead>Tracking ID</TableHead>
+                    <TableHead>Booking / Package</TableHead>
                     <TableHead>Date</TableHead>
                     <TableHead className="text-right">Amount</TableHead>
                     <TableHead>Method</TableHead>

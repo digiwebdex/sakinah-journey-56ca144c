@@ -6,6 +6,7 @@ import {
   Users, Edit2, Save, X, Search, Plus, Trash2, Eye, ChevronLeft, ChevronRight, Pencil, Loader2, FileDown, FileSpreadsheet
 } from "lucide-react";
 import { exportPDF, exportExcel } from "@/lib/reportExport";
+import { generateCustomerPdf, getCompanyInfoForPdf } from "@/lib/entityPdfGenerator";
 import { useIsViewer } from "@/components/admin/AdminLayout";
 import CustomerFinancialReport from "@/components/admin/CustomerFinancialReport";
 import { Badge } from "@/components/ui/badge";
@@ -131,11 +132,9 @@ export default function AdminCustomersPage() {
 
   const saveEdit = async () => {
     if (!editId) return;
-    if (editForm.phone?.trim()) {
-      const phoneErr = getPhoneError(editForm.phone, false);
-      if (phoneErr) { toast.error(phoneErr); return; }
-    }
-    const normalizedPhone = editForm.phone?.trim() ? normalizePhone(editForm.phone) : null;
+    const phoneErr = getPhoneError(editForm.phone || "", true);
+    if (phoneErr) { toast.error(phoneErr); return; }
+    const normalizedPhone = normalizePhone(editForm.phone);
     const { error } = await supabase.from("profiles").update({
       full_name: editForm.full_name || null, phone: normalizedPhone,
       email: editForm.email || null, address: editForm.address || null,
@@ -201,11 +200,63 @@ export default function AdminCustomersPage() {
 
   useEffect(() => { setPage(1); }, [search]);
 
+  const downloadCustomerPdf = async (c: any) => {
+    const s = customerStats[c.user_id] || { totalAmount: 0, totalPaid: 0, totalDue: 0, bookingCount: 0, travelers: 0, bookingIds: [] as string[] };
+    try {
+      const company = await getCompanyInfoForPdf();
+      let custBookings: any[] = [];
+      let custPayments: any[] = [];
+      if (s.bookingIds.length > 0) {
+        const [bRes, pRes] = await Promise.all([
+          supabase.from("bookings").select("id, tracking_id, total_amount, paid_amount, due_amount, status, created_at, packages(name)").in("id", s.bookingIds),
+          supabase.from("payments").select("amount, paid_at, created_at, payment_method, status, installment_number, booking_id").in("booking_id", s.bookingIds).eq("status", "completed"),
+        ]);
+        custBookings = bRes.data || [];
+        custPayments = pRes.data || [];
+      }
+      const trackingByBookingId = Object.fromEntries(custBookings.map(b => [b.id, b.tracking_id]));
+      await generateCustomerPdf({
+        full_name: c.full_name || "N/A",
+        phone: c.phone,
+        passport_number: c.passport_number,
+        address: c.address,
+        notes: c.notes,
+        bookings: custBookings.map(b => ({
+          tracking_id: b.tracking_id,
+          package_name: b.packages?.name || "—",
+          total: Number(b.total_amount),
+          paid: Number(b.paid_amount),
+          due: Number(b.due_amount || 0),
+          status: b.status,
+          date: b.created_at,
+        })),
+        payments: custPayments.map(p => ({
+          amount: Number(p.amount),
+          date: p.paid_at || p.created_at,
+          method: p.payment_method || "—",
+          status: p.status,
+          installment: p.installment_number,
+          tracking_id: trackingByBookingId[p.booking_id] || "—",
+        })),
+        summary: {
+          totalBookings: s.bookingCount,
+          totalAmount: s.totalAmount,
+          totalPaid: s.totalPaid,
+          totalDue: s.totalDue,
+          totalExpenses: 0,
+          profit: 0,
+        },
+      }, company);
+      toast.success("PDF downloaded");
+    } catch {
+      toast.error("Failed to generate PDF");
+    }
+  };
+
   const getActions = (c: any): ActionItem[] => {
-    const s = customerStats[c.user_id] || { totalAmount: 0, totalPaid: 0, totalDue: 0, travelers: 0 };
     return [
       { label: "View", icon: <Eye className="h-3.5 w-3.5" />, onClick: () => setSelectedCustomer(c) },
-      { label: "PDF", icon: <FileDown className="h-3.5 w-3.5" />, onClick: () => exportPDF({ title: `Customer - ${c.full_name || "Unknown"}`, columns: ["Name", "Phone", "Pilgrim Count", "Contract Amount", "Total Paid", "Total Due"], rows: [[c.full_name || "—", c.phone || "—", s.travelers, s.totalAmount, s.totalPaid, s.totalDue]], summary: [`Total Paid: BDT ${s.totalPaid.toLocaleString("en-IN")}`, `Total Due: BDT ${s.totalDue.toLocaleString("en-IN")}`] }) },
+      { label: "PDF", icon: <FileDown className="h-3.5 w-3.5" />, onClick: () => downloadCustomerPdf(c) },
       { label: "Edit", icon: <Pencil className="h-3.5 w-3.5" />, onClick: () => startEdit(c), variant: "warning", hidden: isViewer },
       { label: "Delete", icon: <Trash2 className="h-3.5 w-3.5" />, onClick: () => setDeleteId(c.id), variant: "destructive", hidden: isViewer, separator: true },
     ];
@@ -343,9 +394,9 @@ export default function AdminCustomersPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div><label className="text-xs text-muted-foreground block mb-1">Name *</label>
                 <input className={inputClass} value={editForm.full_name} onChange={e => setEditForm({ ...editForm, full_name: e.target.value })} /></div>
-              <div><label className="text-xs text-muted-foreground block mb-1">Phone</label>
-                <input className={inputClass} value={editForm.phone} onChange={e => handlePhoneChange(e.target.value, v => setEditForm({ ...editForm, phone: v }))} placeholder="01XXXXXXXXX" maxLength={15} />
-                {editForm.phone?.trim() && getPhoneError(editForm.phone) && <p className="text-xs text-destructive mt-1">{getPhoneError(editForm.phone)}</p>}</div>
+              <div><label className="text-xs text-muted-foreground block mb-1">Phone *</label>
+                <input className={inputClass} value={editForm.phone} onChange={e => handlePhoneChange(e.target.value, v => setEditForm({ ...editForm, phone: v }))} placeholder="01XXXXXXXXX" maxLength={15} required />
+                {getPhoneError(editForm.phone || "", true) && <p className="text-xs text-destructive mt-1">{getPhoneError(editForm.phone || "", true)}</p>}</div>
               <div><label className="text-xs text-muted-foreground block mb-1">Email</label>
                 <input className={inputClass} type="email" value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} /></div>
               <div><label className="text-xs text-muted-foreground block mb-1">Passport No.</label>

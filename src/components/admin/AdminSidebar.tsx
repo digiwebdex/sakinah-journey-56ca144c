@@ -30,6 +30,7 @@ const mainMenuItems = [
 ];
 
 const financeMenuItems = [
+  { title: "Invoices",        url: "/admin/invoices",       icon: FileText,        roles: ["admin", "accountant", "viewer"] },
   { title: "Payments",        url: "/admin/payments",       icon: CreditCard,      roles: ["admin", "accountant", "viewer"] },
   { title: "Accounting",      url: "/admin/accounting",     icon: Calculator,      roles: ["admin", "accountant", "viewer"] },
   { title: "Receivables",     url: "/admin/receivables",    icon: DollarSign,      roles: ["admin", "accountant", "viewer"] },

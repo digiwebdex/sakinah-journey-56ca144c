@@ -518,8 +518,8 @@ class QueryBuilder {
           }
         } catch {}
         
-        // Fallback to Supabase client for public reads when VPS is unavailable
-        if (!vpsOk && supabaseClient) {
+        // Supabase fallback disabled in production — fail closed
+        if (!vpsOk && supabaseClient && import.meta.env.DEV) {
           let query: any = supabaseClient.from(this.table).select(this.selectFields);
           for (const f of this.filters) {
             const eqMatch = f.match(/^([^_=]+)=(.+)$/);
@@ -609,9 +609,28 @@ class QueryBuilder {
 // =============================================
 // Storage API (replaces supabase.storage)
 // =============================================
+const PUBLIC_STORAGE_BUCKETS = new Set(['company-assets', 'hotel-images']);
+
+export function normalizeStoragePath(filePath: string, bucket: string): string {
+  let p = String(filePath || '').trim();
+  if (!p) return '';
+  p = p.replace(/^https?:\/\/[^/]+\/uploads\//, '');
+  p = p.replace(/^\/uploads\//, '').replace(/^\//, '');
+  if (p.startsWith(`${bucket}/`)) p = p.slice(bucket.length + 1);
+  return p.replace(/^\/+/, '');
+}
+
+export async function getSecureFileUrl(filePath: string, bucket = 'booking-documents'): Promise<string | null> {
+  const pathInBucket = normalizeStoragePath(filePath, bucket);
+  if (!pathInBucket) return null;
+  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(pathInBucket, 900);
+  if (error || !data?.signedUrl) return null;
+  return data.signedUrl;
+}
+
 const storage = {
   from(bucket: string) {
-    const normalizePath = (p: string) => p.replace(/^\/+/, "");
+    const normalizePath = (p: string) => normalizeStoragePath(p, bucket) || p.replace(/^\/+/, '');
     return {
       async upload(path: string, file: File, _options?: { upsert?: boolean }) {
         const formData = new FormData();
@@ -673,11 +692,35 @@ const storage = {
       },
 
       async createSignedUrl(path: string, _expiresIn: number) {
-        return { data: { signedUrl: `${API_URL.replace('/api', '')}/uploads/${bucket}/${normalizePath(path)}` }, error: null };
+        const pathInBucket = normalizePath(path);
+        if (PUBLIC_STORAGE_BUCKETS.has(bucket)) {
+          return {
+            data: { signedUrl: `${window.location.origin}/uploads/${bucket}/${pathInBucket}` },
+            error: null,
+          };
+        }
+
+        const res = await apiFetch('/files/sign', {
+          method: 'POST',
+          body: JSON.stringify({ bucket, path: pathInBucket }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: 'Failed to sign URL' }));
+          return { data: null, error: { message: err.error || 'Failed to sign URL' } };
+        }
+        const data = await res.json();
+        const signedUrl = String(data.signedUrl || '').startsWith('http')
+          ? data.signedUrl
+          : `${window.location.origin}${data.signedUrl}`;
+        return { data: { signedUrl }, error: null };
       },
 
       getPublicUrl(path: string) {
-        return { data: { publicUrl: `${API_URL.replace('/api', '')}/uploads/${bucket}/${normalizePath(path)}` } };
+        const pathInBucket = normalizePath(path);
+        if (PUBLIC_STORAGE_BUCKETS.has(bucket)) {
+          return { data: { publicUrl: `${window.location.origin}/uploads/${bucket}/${pathInBucket}` } };
+        }
+        return { data: { publicUrl: '' } };
       },
     };
   },

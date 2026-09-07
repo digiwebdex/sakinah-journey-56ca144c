@@ -16,12 +16,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import AdminActionMenu, { ActionItem } from "@/components/admin/AdminActionMenu";
-import { handlePhoneChange } from "@/lib/phoneValidation";
+import { handlePhoneChange, getPhoneError } from "@/lib/phoneValidation";
 import CustomerSearchSelect from "@/components/admin/CustomerSearchSelect";
 import { format } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { formatBDT, cn, formatTrackingId } from "@/lib/utils";
+import { SecureDocumentImage, SecureDocumentLink } from "@/components/SecureDocumentLink";
 
 const inputClass = "w-full bg-secondary border border-border rounded-md px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40";
 const STATUSES = ["pending", "confirmed", "visa_processing", "ticket_issued", "completed", "cancelled"];
@@ -201,15 +202,16 @@ function BookingDetail({ bookingId }: { bookingId: string }) {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             {documents.map((doc: any) => {
               const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(doc.file_name || doc.file_path || "");
-              const fileUrl = doc.file_path?.startsWith("/") ? doc.file_path : `/uploads/${doc.file_path}`;
               return (
                 <div key={doc.id} className="bg-secondary/30 rounded-lg p-3 space-y-2">
                   <div className="flex items-center justify-between">
                     <Badge variant="outline" className="text-[10px] capitalize">{doc.document_type}</Badge>
-                    <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-primary hover:underline">View</a>
+                    <SecureDocumentLink filePath={doc.file_path} className="text-[10px] text-primary hover:underline">
+                      View
+                    </SecureDocumentLink>
                   </div>
                   {isImage && (
-                    <img src={fileUrl} alt={doc.document_type} className="w-full h-20 object-cover rounded border border-border" />
+                    <SecureDocumentImage filePath={doc.file_path} alt={doc.document_type} className="w-full h-20 object-cover rounded border border-border" />
                   )}
                   <p className="text-[10px] text-muted-foreground truncate">{doc.file_name}</p>
                   {doc.file_size && <p className="text-[10px] text-muted-foreground">{(doc.file_size / 1024).toFixed(1)} KB</p>}
@@ -287,6 +289,7 @@ export default function AdminBookingsPage() {
   const [statusChangeVal, setStatusChangeVal] = useState("");
   const [bookingPayments, setBookingPayments] = useState<Record<string, any[]>>({});
   const [editMembers, setEditMembers] = useState<any[]>([]);
+  const [deletedMemberIds, setDeletedMemberIds] = useState<string[]>([]);
   const [bookingDocs, setBookingDocs] = useState<Record<string, any[]>>({});
   const [inlineStatusId, setInlineStatusId] = useState<string | null>(null);
   const [docReviewBooking, setDocReviewBooking] = useState<any>(null);
@@ -484,6 +487,7 @@ export default function AdminBookingsPage() {
 
     const hydratedMembers = existingMembers.length > 0 ? existingMembers : (shouldUseFamily ? fallbackMembers : []);
     setEditMembers(hydratedMembers);
+    setDeletedMemberIds([]);
 
     if (shouldUseFamily) {
       setEditForm((prev: any) => ({
@@ -505,6 +509,8 @@ export default function AdminBookingsPage() {
 
   const saveEdit = async () => {
     if (!editingId) return;
+    const phoneErr = getPhoneError(editForm.guest_phone || "", true);
+    if (phoneErr) { toast.error(`Phone: ${phoneErr}`); return; }
     const isFamily = isFamilyBooking(editForm.booking_type, editMembers.length);
     const sellingPP = toMoney(editForm.selling_price_per_person);
     const costPP = toMoney(editForm.cost_price_per_person);
@@ -540,6 +546,12 @@ export default function AdminBookingsPage() {
     const paid = Math.min(toMoney(editForm.paid_amount), totalSelling);
     const due = Math.max(0, totalSelling - paid);
     const profit = totalSelling - totalCostVal - totalCommVal - extraExp;
+
+    // Delete members that were removed in the UI.
+    if (deletedMemberIds.length > 0) {
+      const { error: delErr } = await supabase.from("booking_members").delete().in("id", deletedMemberIds);
+      if (delErr) { toast.error(`Failed to remove member: ${delErr.message}`); return; }
+    }
 
     if (isFamily && preparedMembers.length > 0) {
       const memberResults = await Promise.all(
@@ -602,6 +614,7 @@ export default function AdminBookingsPage() {
     toast.success("Booking updated successfully");
     setEditingId(null);
     setEditMembers([]);
+    setDeletedMemberIds([]);
     fetchBookings();
     fetchAllPayments();
   };
@@ -979,7 +992,7 @@ export default function AdminBookingsPage() {
 
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                           <div><label className="text-xs text-muted-foreground block mb-1">Customer Name</label><input className={inputClass} value={editForm.guest_name} onChange={(e) => setEditForm({ ...editForm, guest_name: e.target.value })} /></div>
-                          <div><label className="text-xs text-muted-foreground block mb-1">Phone</label><input className={inputClass} value={editForm.guest_phone} onChange={(e) => handlePhoneChange(e.target.value, (v) => setEditForm({ ...editForm, guest_phone: v }))} maxLength={15} /></div>
+                          <div><label className="text-xs text-muted-foreground block mb-1">Phone *</label><input className={inputClass} value={editForm.guest_phone} onChange={(e) => handlePhoneChange(e.target.value, (v) => setEditForm({ ...editForm, guest_phone: v }))} maxLength={15} required /></div>
                           <div><label className="text-xs text-muted-foreground block mb-1">Passport</label><input className={inputClass} value={editForm.guest_passport} onChange={(e) => setEditForm({ ...editForm, guest_passport: e.target.value })} /></div>
                         </div>
 
@@ -1010,13 +1023,25 @@ export default function AdminBookingsPage() {
                               </div>
                             </div>
                             {editMembers.map((m: any, idx: number) => (
-                              <div key={m.id || m.temp_id || `member-${idx}`} className="grid grid-cols-2 sm:grid-cols-6 gap-2 bg-secondary/30 rounded-md p-2">
-                                <div><label className="text-[10px] text-muted-foreground block mb-0.5">Name</label><input className={inputClass + " text-xs"} value={m.full_name} onChange={(e) => { const u = [...editMembers]; u[idx] = { ...u[idx], full_name: e.target.value }; setEditMembers(u); }} /></div>
-                                <div><label className="text-[10px] text-muted-foreground block mb-0.5">Passport</label><input className={inputClass + " text-xs"} value={m.passport_number || ""} onChange={(e) => { const u = [...editMembers]; u[idx] = { ...u[idx], passport_number: e.target.value }; setEditMembers(u); }} /></div>
-                                <div><label className="text-[10px] text-muted-foreground block mb-0.5">Package</label><div className={`${inputClass} text-xs bg-muted/50`}>{b.packages?.name || "N/A"}</div></div>
-                                <div><label className="text-[10px] text-muted-foreground block mb-0.5">Selling</label><input className={inputClass + " text-xs"} type="number" min={0} value={m.selling_price} onChange={(e) => { const u = [...editMembers]; const sp = toMoney(e.target.value); const d = Math.min(toMoney(u[idx].discount), sp); u[idx] = { ...u[idx], selling_price: sp, discount: d, final_price: Math.max(0, sp - d) }; setEditMembers(u); }} /></div>
-                                <div><label className="text-[10px] text-muted-foreground block mb-0.5">Discount</label><input className={inputClass + " text-xs"} type="number" min={0} value={m.discount} onChange={(e) => { const u = [...editMembers]; const s = toMoney(u[idx].selling_price); const d = Math.min(toMoney(e.target.value), s); u[idx] = { ...u[idx], discount: d, final_price: Math.max(0, s - d) }; setEditMembers(u); }} /></div>
-                                <div><label className="text-[10px] text-muted-foreground block mb-0.5">Final</label><div className={`${inputClass} bg-muted/50 font-bold text-xs`}>৳{Number(m.final_price || 0).toLocaleString("en-IN")}</div></div>
+                              <div key={m.id || m.temp_id || `member-${idx}`} className="flex items-end gap-2 bg-secondary/30 rounded-md p-2">
+                                <div className="flex-[2] min-w-0"><label className="text-[10px] text-muted-foreground block mb-0.5">Name</label><input className={inputClass + " text-xs"} value={m.full_name} onChange={(e) => { const u = [...editMembers]; u[idx] = { ...u[idx], full_name: e.target.value }; setEditMembers(u); }} /></div>
+                                <div className="flex-[1.5] min-w-0"><label className="text-[10px] text-muted-foreground block mb-0.5">Passport</label><input className={inputClass + " text-xs"} value={m.passport_number || ""} onChange={(e) => { const u = [...editMembers]; u[idx] = { ...u[idx], passport_number: e.target.value }; setEditMembers(u); }} /></div>
+                                <div className="flex-[2] min-w-0"><label className="text-[10px] text-muted-foreground block mb-0.5">Package</label><div className={`${inputClass} text-xs bg-muted/50 truncate`}>{b.packages?.name || "N/A"}</div></div>
+                                <div className="flex-1 min-w-0"><label className="text-[10px] text-muted-foreground block mb-0.5">Selling</label><input className={inputClass + " text-xs"} type="number" min={0} value={m.selling_price} onChange={(e) => { const u = [...editMembers]; const sp = toMoney(e.target.value); const d = Math.min(toMoney(u[idx].discount), sp); u[idx] = { ...u[idx], selling_price: sp, discount: d, final_price: Math.max(0, sp - d) }; setEditMembers(u); }} /></div>
+                                <div className="flex-1 min-w-0"><label className="text-[10px] text-muted-foreground block mb-0.5">Discount</label><input className={inputClass + " text-xs"} type="number" min={0} value={m.discount} onChange={(e) => { const u = [...editMembers]; const s = toMoney(u[idx].selling_price); const d = Math.min(toMoney(e.target.value), s); u[idx] = { ...u[idx], discount: d, final_price: Math.max(0, s - d) }; setEditMembers(u); }} /></div>
+                                <div className="flex-1 min-w-0"><label className="text-[10px] text-muted-foreground block mb-0.5">Final</label><div className={`${inputClass} bg-muted/50 font-bold text-xs`}>৳{Number(m.final_price || 0).toLocaleString("en-IN")}</div></div>
+                                <button
+                                  type="button"
+                                  title="Remove member"
+                                  onClick={() => {
+                                    if (m.id) setDeletedMemberIds((prev) => [...prev, m.id]);
+                                    setEditMembers((prev: any[]) => prev.filter((_: any, i: number) => i !== idx));
+                                    setEditForm((prev: any) => ({ ...prev, num_travelers: Math.max(1, Number(prev.num_travelers || 1) - 1) }));
+                                  }}
+                                  className="shrink-0 mb-0.5 p-1.5 rounded-md bg-destructive/10 text-destructive hover:bg-destructive hover:text-white transition-colors"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
                               </div>
                             ))}
                             {editMembers.length > 0 && <div className="text-right text-xs font-bold text-primary">Members Total: ৳{editMembers.reduce((s: number, m: any) => s + Number(m.final_price || 0), 0).toLocaleString("en-IN")}</div>}
@@ -1244,7 +1269,6 @@ export default function AdminBookingsPage() {
                 {docs.length > 0 ? (
                   <div className="space-y-3">
                     {docs.map((doc: any) => {
-                      const fileUrl = doc.file_path?.startsWith("http") ? doc.file_path : doc.file_path?.startsWith("/") ? doc.file_path : `/uploads/${doc.file_path}`;
                       const fileSizeKB = doc.file_size ? (doc.file_size / 1024).toFixed(1) : null;
                       const uploadDate = doc.created_at ? new Date(doc.created_at).toLocaleDateString("en-GB", { month: "short", day: "2-digit", year: "numeric" }) : "";
                       const uploadTime = doc.created_at ? new Date(doc.created_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "";
@@ -1263,14 +1287,14 @@ export default function AdminBookingsPage() {
                             </div>
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
-                            <a href={fileUrl} target="_blank" rel="noopener noreferrer"
+                            <SecureDocumentLink filePath={doc.file_path}
                               className="inline-flex items-center gap-1 text-xs font-medium text-primary border border-primary/30 rounded-md px-2.5 py-1.5 hover:bg-primary/10 transition-colors">
                               <Eye className="h-3.5 w-3.5" /> View
-                            </a>
-                            <a href={fileUrl} download={doc.file_name}
+                            </SecureDocumentLink>
+                            <SecureDocumentLink filePath={doc.file_path} download={doc.file_name}
                               className="inline-flex items-center justify-center h-8 w-8 rounded-md border border-border hover:bg-secondary transition-colors">
                               <Download className="h-3.5 w-3.5 text-muted-foreground" />
-                            </a>
+                            </SecureDocumentLink>
                           </div>
                         </div>
                       );

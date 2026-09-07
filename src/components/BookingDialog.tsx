@@ -15,6 +15,7 @@ import PersonalDetailsStep, { type PersonalInfo } from "@/components/booking/Per
 import DocumentUploadStep, { type UploadedDoc } from "@/components/booking/DocumentUploadStep";
 import BookingSuccess from "@/components/booking/BookingSuccess";
 import { useLanguage } from "@/i18n/LanguageContext";
+import { getPhoneError } from "@/lib/phoneValidation";
 
 const PAYMENT_LOGOS: Record<string, string> = {
   bkash: bkashLogo,
@@ -141,7 +142,8 @@ const BookingDialog = ({ open, onOpenChange, packageId }: BookingDialogProps) =>
     if (step === 0 && !pkg) { toast.error(t("booking.selectPackage")); return false; }
     if (step === 1) {
       if (!personalInfo.fullName.trim()) { toast.error(t("booking.nameRequired")); return false; }
-      if (!personalInfo.phone.trim()) { toast.error(t("booking.phoneRequired")); return false; }
+      const phoneError = getPhoneError(personalInfo.phone, true);
+      if (phoneError) { toast.error(phoneError === "Phone number is required." ? t("booking.phoneRequired") : phoneError); return false; }
     }
     return true;
   };

@@ -119,7 +119,7 @@ router.post('/forgot-password', async (req, res) => {
     if (result.rows[0]) {
       const resetToken = jwt.sign({ userId: result.rows[0].id, type: 'reset' }, process.env.JWT_SECRET, { expiresIn: '1h' });
       // TODO: Send email with reset link containing token
-      console.log('Reset token for', email, ':', resetToken);
+      console.log('Password reset requested for', email.trim().toLowerCase());
     }
     res.json({ message: 'If the email exists, a reset link has been sent' });
   } catch (err) {

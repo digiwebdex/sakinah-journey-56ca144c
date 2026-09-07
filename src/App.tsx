@@ -53,6 +53,7 @@ const AdminRefundsPage = lazy(() => import("./pages/admin/AdminRefundsPage"));
 const AdminAnalyticsPage = lazy(() => import("./pages/admin/AdminAnalyticsPage"));
 const AdminSeoPage = lazy(() => import("./pages/admin/AdminSeoPage"));
 const AdminPaymentMethodsPage = lazy(() => import("./pages/admin/AdminPaymentMethodsPage"));
+const AdminInvoicesPage = lazy(() => import("./pages/admin/AdminInvoicesPage"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -107,6 +108,7 @@ const App = () => (
               <Route path="customers" element={<AdminCustomersPage />} />
               <Route path="packages" element={<AdminPackagesPage />} />
               <Route path="payments" element={<AdminPaymentsPage />} />
+              <Route path="invoices" element={<AdminInvoicesPage />} />
               <Route path="accounting" element={<AdminAccountingPage />} />
               <Route path="reports" element={<AdminReportsPage />} />
               <Route path="moallems" element={<AdminMoallemsPage />} />

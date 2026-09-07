@@ -323,6 +323,7 @@ CREATE TABLE IF NOT EXISTS moallem_payments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   moallem_id UUID NOT NULL REFERENCES moallems(id),
   booking_id UUID REFERENCES bookings(id),
+  package_id UUID REFERENCES packages(id) ON DELETE SET NULL,
   amount NUMERIC NOT NULL,
   date DATE NOT NULL DEFAULT CURRENT_DATE,
   payment_method TEXT DEFAULT 'cash',
@@ -352,6 +353,7 @@ CREATE TABLE IF NOT EXISTS supplier_agent_payments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   supplier_agent_id UUID NOT NULL REFERENCES supplier_agents(id),
   booking_id UUID REFERENCES bookings(id),
+  package_id UUID REFERENCES packages(id) ON DELETE SET NULL,
   amount NUMERIC NOT NULL,
   date DATE NOT NULL DEFAULT CURRENT_DATE,
   payment_method TEXT DEFAULT 'cash',
@@ -1224,7 +1226,9 @@ CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
 CREATE INDEX IF NOT EXISTS idx_profiles_user_id ON profiles(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_roles_user_id ON user_roles(user_id);
 CREATE INDEX IF NOT EXISTS idx_moallem_payments_moallem_id ON moallem_payments(moallem_id);
+CREATE INDEX IF NOT EXISTS idx_moallem_payments_package_id ON moallem_payments(package_id);
 CREATE INDEX IF NOT EXISTS idx_supplier_agent_payments_supplier_id ON supplier_agent_payments(supplier_agent_id);
+CREATE INDEX IF NOT EXISTS idx_supplier_agent_payments_package_id ON supplier_agent_payments(package_id);
 CREATE INDEX IF NOT EXISTS idx_site_content_section_key ON site_content(section_key);
 
 -- =============================================

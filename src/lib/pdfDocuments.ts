@@ -10,12 +10,12 @@ import {
   addSectionTitle, addSummaryCards, addInfoBox, addFinancialBox,
   addBalanceBar, addSignatureBlock, addWatermark, addRawTable,
   addDueHighlight, addTotalsBar, addFilterSummary, addBillToAndMeta,
-  getWatermarkStatus, ensurePageSpace, buildFileName,
+  getWatermarkStatus, ensurePageSpace, buildFileName, addFinancialSummary, INVOICE_TABLE,
   fmtDate, fmtBDT, fmtAmount, bengaliCellHook,
   DARK, LIGHT_BG, TABLE_HEADER, MUTED,
   type SummaryCard, type FilterItem, type InfoField,
 } from "./pdfCore";
-import { generateTrackingQr, addQrToDoc } from "./pdfQrCode";
+import { generateTrackingQr, addQrToDoc, addPaymentWatermark } from "./pdfQrCode";
 
 const MARGIN = 16;
 
@@ -253,8 +253,9 @@ export async function generateExpenseVoucher(data: ExpenseVoucherData) {
 export interface CustomerStatementData {
   customerName: string;
   customerPhone?: string | null;
-  email?: string | null;
+  passport?: string | null;
   address?: string | null;
+  notes?: string | null;
   statementPeriod?: string;
   bookings: { trackingId: string; packageName: string; date: string; total: number; paid: number; due: number; status: string }[];
   payments: { date: string; description: string; amount: number; method: string; status: string }[];
@@ -265,39 +266,42 @@ export async function generateCustomerStatement(data: CustomerStatementData) {
   const { doc, logoBase64, sig, cfg } = await initPdf();
 
   let y = await addPdfHeader(doc, cfg, logoBase64);
+  addPaymentWatermark(doc, getWatermarkStatus(data.summary.totalPaid, data.summary.totalDue));
 
-  y = addTitleBlock(doc, y, "CUSTOMER STATEMENT");
-
-  y = addBillToAndMeta(doc, y,
+  y = addBillToAndMeta(
+    doc, y,
     [
       { label: "Name", value: data.customerName },
       { label: "Phone", value: data.customerPhone || "N/A" },
-      { label: "Email", value: data.email || "N/A" },
+      { label: "Passport", value: data.passport || "N/A" },
       { label: "Address", value: data.address || "N/A" },
+      { label: "Note", value: data.notes?.trim() || "N/A" },
     ],
     [
-      { label: "Generated", value: fmtDate(new Date().toISOString()) },
+      { label: "Statement Date", value: fmtDate(new Date().toISOString()) },
       ...(data.statementPeriod ? [{ label: "Period", value: data.statementPeriod }] : []),
-    ]
+      { label: "Total Bookings", value: String(data.summary.totalBookings) },
+    ],
+    { title: "CUSTOMER STATEMENT" }
   );
-
-  y = addSummaryCards(doc, y, [
-    { label: "Bookings", value: String(data.summary.totalBookings) },
-    { label: "Total Amount", value: fmtBDT(data.summary.totalAmount) },
-    { label: "Total Paid", value: fmtBDT(data.summary.totalPaid) },
-    { label: "Total Due", value: fmtBDT(data.summary.totalDue), highlight: data.summary.totalDue > 0 },
-  ]);
 
   if (data.bookings.length > 0) {
     y = addSectionTitle(doc, y, "BOOKINGS");
     y = addRawTable(doc, {
       startY: y,
-      head: ["Tracking ID", "Package", "Date", "Total", "Paid", "Due", "Status"],
+      head: ["Tracking ID", "Package", "Date", "Total (BDT)", "Paid (BDT)", "Due (BDT)", "Status"],
       body: data.bookings.map(b => [
         b.trackingId, b.packageName, fmtDate(b.date),
-        fmtBDT(b.total), fmtBDT(b.paid), fmtBDT(b.due),
+        fmtAmount(b.total), fmtAmount(b.paid), fmtAmount(b.due),
         b.status.charAt(0).toUpperCase() + b.status.slice(1),
       ]),
+      columnStyles: {
+        3: { halign: "right" },
+        4: { halign: "right" },
+        5: { halign: "right" },
+        6: { halign: "center", cellWidth: 18 },
+      },
+      ...INVOICE_TABLE,
     });
   }
 
@@ -306,16 +310,31 @@ export async function generateCustomerStatement(data: CustomerStatementData) {
     y = addSectionTitle(doc, y, "PAYMENT HISTORY");
     y = addRawTable(doc, {
       startY: y,
-      head: ["Date", "Description", "Amount", "Method", "Status"],
-      body: data.payments.map(p => [
-        fmtDate(p.date), p.description, fmtBDT(p.amount), p.method,
+      head: ["#", "Date", "Description", "Method", "Amount (BDT)", "Status"],
+      body: data.payments.map((p, i) => [
+        String(i + 1), fmtDate(p.date), p.description,
+        p.method.charAt(0).toUpperCase() + p.method.slice(1),
+        fmtAmount(p.amount),
         p.status.charAt(0).toUpperCase() + p.status.slice(1),
       ]),
+      columnStyles: {
+        0: { cellWidth: 12, halign: "center" },
+        4: { halign: "right", fontStyle: "bold" },
+        5: { halign: "center", cellWidth: 18 },
+      },
+      ...INVOICE_TABLE,
     });
   }
 
+  y = ensurePageSpace(doc, y, 50);
+  y = addFinancialSummary(
+    doc, y,
+    data.summary.totalAmount, 0, data.summary.totalAmount,
+    data.summary.totalPaid, data.summary.totalDue
+  );
+
   y = addSignatureBlock(doc, sig, y);
-  addPdfFooter(doc, cfg, { showPageNumbers: true });
+  addPdfFooter(doc, cfg);
   doc.save(buildFileName("Statement", data.customerName.replace(/\s+/g, "_")));
 }
 
@@ -327,6 +346,7 @@ export interface MoallemStatementData {
   phone?: string | null;
   address?: string | null;
   nidNumber?: string | null;
+  notes?: string | null;
   bookings: { trackingId: string; guestName: string; packageName: string; total: number; paid: number; due: number; status: string }[];
   deposits: { date: string; amount: number; method: string; notes?: string | null }[];
   commissions: { date: string; amount: number; method: string; notes?: string | null }[];
@@ -337,43 +357,40 @@ export async function generateMoallemStatement(data: MoallemStatementData) {
   const { doc, logoBase64, sig, cfg } = await initPdf();
 
   let y = await addPdfHeader(doc, cfg, logoBase64);
+  addPaymentWatermark(doc, getWatermarkStatus(data.summary.totalPaid, data.summary.totalDue));
 
-  y = addTitleBlock(doc, y, "MOALLEM STATEMENT");
-
-  y = addBillToAndMeta(doc, y,
+  y = addBillToAndMeta(
+    doc, y,
     [
       { label: "Name", value: data.moallemName },
       { label: "Phone", value: data.phone || "N/A" },
       { label: "NID", value: data.nidNumber || "N/A" },
       { label: "Address", value: data.address || "N/A" },
+      { label: "Note", value: data.notes?.trim() || "N/A" },
     ],
     [
-      { label: "Generated", value: fmtDate(new Date().toISOString()) },
-    ]
+      { label: "Statement Date", value: fmtDate(new Date().toISOString()) },
+      { label: "Total Bookings", value: String(data.summary.totalBookings) },
+    ],
+    { title: "MOALLEM STATEMENT", leftHeading: "DETAILS" }
   );
-
-  y = addSummaryCards(doc, y, [
-    { label: "Bookings", value: String(data.summary.totalBookings) },
-    { label: "Total Amount", value: fmtBDT(data.summary.totalAmount) },
-    { label: "Deposits", value: fmtBDT(data.summary.totalDeposit) },
-    { label: "Due", value: fmtBDT(data.summary.totalDue), highlight: data.summary.totalDue > 0 },
-  ]);
-
-  y = addTotalsBar(doc, y, [
-    `Commission: ${fmtBDT(data.summary.totalCommission)}`,
-    `Comm. Paid: ${fmtBDT(data.summary.commissionPaid)}`,
-    `Comm. Due: ${fmtBDT(data.summary.commissionDue)}`,
-  ]);
 
   if (data.bookings.length > 0) {
     y = addSectionTitle(doc, y, "BOOKINGS");
     y = addRawTable(doc, {
       startY: y,
-      head: ["Tracking ID", "Guest", "Package", "Total", "Paid", "Due", "Status"],
+      head: ["Tracking ID", "Guest", "Package", "Total (BDT)", "Paid (BDT)", "Due (BDT)", "Status"],
       body: data.bookings.map(b => [
         b.trackingId, b.guestName, b.packageName,
-        fmtBDT(b.total), fmtBDT(b.paid), fmtBDT(b.due), b.status,
+        fmtAmount(b.total), fmtAmount(b.paid), fmtAmount(b.due), b.status,
       ]),
+      columnStyles: {
+        3: { halign: "right" },
+        4: { halign: "right" },
+        5: { halign: "right" },
+        6: { halign: "center", cellWidth: 18 },
+      },
+      ...INVOICE_TABLE,
     });
   }
 
@@ -382,8 +399,14 @@ export async function generateMoallemStatement(data: MoallemStatementData) {
     y = addSectionTitle(doc, y, "MOALLEM DEPOSITS");
     y = addRawTable(doc, {
       startY: y,
-      head: ["Date", "Amount", "Method", "Notes"],
-      body: data.deposits.map(p => [fmtDate(p.date), fmtBDT(p.amount), p.method, p.notes || "—"]),
+      head: ["#", "Date", "Method", "Amount (BDT)", "Notes"],
+      body: data.deposits.map((p, i) => [
+        String(i + 1), fmtDate(p.date),
+        p.method.charAt(0).toUpperCase() + p.method.slice(1),
+        fmtAmount(p.amount), p.notes || "—",
+      ]),
+      columnStyles: { 0: { cellWidth: 12, halign: "center" }, 3: { halign: "right", fontStyle: "bold" } },
+      ...INVOICE_TABLE,
     });
   }
 
@@ -392,13 +415,33 @@ export async function generateMoallemStatement(data: MoallemStatementData) {
     y = addSectionTitle(doc, y, "COMMISSION PAYMENTS");
     y = addRawTable(doc, {
       startY: y,
-      head: ["Date", "Amount", "Method", "Notes"],
-      body: data.commissions.map(p => [fmtDate(p.date), fmtBDT(p.amount), p.method, p.notes || "—"]),
+      head: ["#", "Date", "Method", "Amount (BDT)", "Notes"],
+      body: data.commissions.map((p, i) => [
+        String(i + 1), fmtDate(p.date),
+        p.method.charAt(0).toUpperCase() + p.method.slice(1),
+        fmtAmount(p.amount), p.notes || "—",
+      ]),
+      columnStyles: { 0: { cellWidth: 12, halign: "center" }, 3: { halign: "right", fontStyle: "bold" } },
+      ...INVOICE_TABLE,
     });
   }
 
+  y = ensurePageSpace(doc, y, 50);
+  y = addFinancialSummary(
+    doc, y,
+    data.summary.totalAmount, 0, data.summary.totalAmount,
+    data.summary.totalPaid, data.summary.totalDue
+  );
+
+  y = addFinancialBox(doc, y, [
+    { label: "Total Deposit", value: `BDT ${fmtAmount(data.summary.totalDeposit)}` },
+    { label: "Total Commission", value: `BDT ${fmtAmount(data.summary.totalCommission)}` },
+    { label: "Commission Paid", value: `BDT ${fmtAmount(data.summary.commissionPaid)}` },
+    { label: "Commission Due", value: `BDT ${fmtAmount(data.summary.commissionDue)}`, bold: true },
+  ], { align: "right", width: 95 });
+
   y = addSignatureBlock(doc, sig, y);
-  addPdfFooter(doc, cfg, { showPageNumbers: true });
+  addPdfFooter(doc, cfg);
   doc.save(buildFileName("Moallem_Statement", data.moallemName.replace(/\s+/g, "_")));
 }
 
@@ -410,6 +453,7 @@ export interface SupplierStatementData {
   companyName?: string | null;
   phone?: string | null;
   address?: string | null;
+  notes?: string | null;
   bookings: { trackingId: string; guestName: string; packageName: string; cost: number; paid: number; due: number; status: string }[];
   payments: { date: string; amount: number; method: string; notes?: string | null; category?: string }[];
   contracts?: { contractAmount: number; pilgrimCount: number; totalPaid: number; totalDue: number }[];
@@ -420,37 +464,40 @@ export async function generateSupplierStatement(data: SupplierStatementData) {
   const { doc, logoBase64, sig, cfg } = await initPdf();
 
   let y = await addPdfHeader(doc, cfg, logoBase64);
+  addPaymentWatermark(doc, getWatermarkStatus(data.summary.totalPaid, data.summary.totalDue));
 
-  y = addTitleBlock(doc, y, "SUPPLIER STATEMENT");
-
-  y = addBillToAndMeta(doc, y,
+  y = addBillToAndMeta(
+    doc, y,
     [
-      { label: "Agent", value: data.agentName },
-      { label: "Company", value: data.companyName || "N/A" },
+      { label: "Name", value: data.agentName },
       { label: "Phone", value: data.phone || "N/A" },
+      { label: "Company", value: data.companyName || "N/A" },
       { label: "Address", value: data.address || "N/A" },
+      { label: "Note", value: data.notes?.trim() || "N/A" },
     ],
     [
-      { label: "Generated", value: fmtDate(new Date().toISOString()) },
-    ]
+      { label: "Statement Date", value: fmtDate(new Date().toISOString()) },
+      { label: "Total Bookings", value: String(data.summary.totalBookings) },
+    ],
+    { title: "SUPPLIER STATEMENT", leftHeading: "DETAILS" }
   );
-
-  y = addSummaryCards(doc, y, [
-    { label: "Contracted Hajji", value: String(data.summary.contractedHajji) },
-    { label: "Total Billed", value: fmtBDT(data.summary.totalBilled) },
-    { label: "Total Paid", value: fmtBDT(data.summary.totalPaid) },
-    { label: "Outstanding", value: fmtBDT(data.summary.totalDue), highlight: data.summary.totalDue > 0 },
-  ]);
 
   if (data.bookings.length > 0) {
     y = addSectionTitle(doc, y, "BOOKINGS");
     y = addRawTable(doc, {
       startY: y,
-      head: ["Tracking ID", "Guest", "Package", "Cost", "Paid", "Due", "Status"],
+      head: ["Tracking ID", "Guest", "Package", "Cost (BDT)", "Paid (BDT)", "Due (BDT)", "Status"],
       body: data.bookings.map(b => [
         b.trackingId, b.guestName, b.packageName,
-        fmtBDT(b.cost), fmtBDT(b.paid), fmtBDT(b.due), b.status,
+        fmtAmount(b.cost), fmtAmount(b.paid), fmtAmount(b.due), b.status,
       ]),
+      columnStyles: {
+        3: { halign: "right" },
+        4: { halign: "right" },
+        5: { halign: "right" },
+        6: { halign: "center", cellWidth: 18 },
+      },
+      ...INVOICE_TABLE,
     });
   }
 
@@ -459,10 +506,14 @@ export async function generateSupplierStatement(data: SupplierStatementData) {
     y = addSectionTitle(doc, y, "PAYMENT HISTORY");
     y = addRawTable(doc, {
       startY: y,
-      head: ["Date", "Category", "Amount", "Method", "Notes"],
-      body: data.payments.map(p => [
-        fmtDate(p.date), p.category || "Payment", fmtBDT(p.amount), p.method, p.notes || "—",
+      head: ["#", "Date", "Category", "Method", "Amount (BDT)", "Notes"],
+      body: data.payments.map((p, i) => [
+        String(i + 1), fmtDate(p.date), p.category || "Payment",
+        p.method.charAt(0).toUpperCase() + p.method.slice(1),
+        fmtAmount(p.amount), p.notes || "—",
       ]),
+      columnStyles: { 0: { cellWidth: 12, halign: "center" }, 4: { halign: "right", fontStyle: "bold" } },
+      ...INVOICE_TABLE,
     });
   }
 
@@ -471,15 +522,25 @@ export async function generateSupplierStatement(data: SupplierStatementData) {
     y = addSectionTitle(doc, y, "CONTRACTS");
     y = addRawTable(doc, {
       startY: y,
-      head: ["Pilgrim Count", "Contract Amount", "Paid", "Due"],
+      head: ["Pilgrim Count", "Contract (BDT)", "Paid (BDT)", "Due (BDT)"],
       body: data.contracts.map(c => [
-        String(c.pilgrimCount), fmtBDT(c.contractAmount), fmtBDT(c.totalPaid), fmtBDT(c.totalDue),
+        String(c.pilgrimCount), fmtAmount(c.contractAmount),
+        fmtAmount(c.totalPaid), fmtAmount(c.totalDue),
       ]),
+      columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right", fontStyle: "bold" } },
+      ...INVOICE_TABLE,
     });
   }
 
+  y = ensurePageSpace(doc, y, 50);
+  y = addFinancialSummary(
+    doc, y,
+    data.summary.totalBilled, 0, data.summary.totalBilled,
+    data.summary.totalPaid, data.summary.totalDue
+  );
+
   y = addSignatureBlock(doc, sig, y);
-  addPdfFooter(doc, cfg, { showPageNumbers: true });
+  addPdfFooter(doc, cfg);
   doc.save(buildFileName("Supplier_Statement", data.agentName.replace(/\s+/g, "_")));
 }
 

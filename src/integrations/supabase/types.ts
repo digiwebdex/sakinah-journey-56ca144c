@@ -785,6 +785,7 @@ export type Database = {
           id: string
           moallem_id: string
           notes: string | null
+          package_id: string | null
           payment_method: string | null
           recorded_by: string | null
           wallet_account_id: string | null
@@ -891,6 +892,7 @@ export type Database = {
           id: string
           moallem_id: string
           notes: string | null
+          package_id: string | null
           payment_method: string | null
           receipt_file_path: string | null
           recorded_by: string | null
@@ -904,6 +906,7 @@ export type Database = {
           id?: string
           moallem_id: string
           notes?: string | null
+          package_id?: string | null
           payment_method?: string | null
           receipt_file_path?: string | null
           recorded_by?: string | null
@@ -917,6 +920,7 @@ export type Database = {
           id?: string
           moallem_id?: string
           notes?: string | null
+          package_id?: string | null
           payment_method?: string | null
           receipt_file_path?: string | null
           recorded_by?: string | null
@@ -1474,6 +1478,7 @@ export type Database = {
           date: string
           id: string
           notes: string | null
+          package_id: string | null
           payment_method: string | null
           receipt_file_path: string | null
           recorded_by: string | null
@@ -1487,6 +1492,7 @@ export type Database = {
           date?: string
           id?: string
           notes?: string | null
+          package_id?: string | null
           payment_method?: string | null
           receipt_file_path?: string | null
           recorded_by?: string | null
@@ -1500,6 +1506,7 @@ export type Database = {
           date?: string
           id?: string
           notes?: string | null
+          package_id?: string | null
           payment_method?: string | null
           receipt_file_path?: string | null
           recorded_by?: string | null
@@ -1520,6 +1527,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_booking_profit"
             referencedColumns: ["booking_id"]
+          },
+          {
+            foreignKeyName: "supplier_agent_payments_package_id_fkey"
+            columns: ["package_id"]
+            isOneToOne: false
+            referencedRelation: "packages"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "supplier_agent_payments_supplier_agent_id_fkey"

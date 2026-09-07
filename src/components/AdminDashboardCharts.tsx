@@ -1,10 +1,15 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   TrendingUp, DollarSign, Package,
   Users, Wallet, ArrowUpRight, ArrowDownRight, UserCheck,
-  CalendarDays, CreditCard, Activity, PieChart,
+  CalendarDays, CreditCard, Activity, PieChart, Star, Award,
+  Globe, Plane, Ticket, Building2, MapPin, Layers, FileText, Clock, CheckCircle,
 } from "lucide-react";
+import { fetchInvoiceStats } from "@/lib/invoiceRecords";
+import { getMonth, getYear } from "date-fns";
+import { buildPackageProfitReport, summarizePackageProfit } from "@/lib/packageProfitReport";
+import { buildServiceProfitReport, summarizeServiceProfit, SERVICE_CATEGORIES } from "@/lib/serviceProfitReport";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -26,18 +31,25 @@ interface Props {
   supplierContracts?: any[];
   supplierContractPayments?: any[];
   dailyCashbook?: any[];
+  packages?: any[];
   onMarkPaid: (id: string) => void;
 }
 
 const AdminDashboardCharts = ({
   bookings, payments, expenses = [], accounts = [],
   moallemPayments = [], supplierPayments = [], commissionPayments = [],
-  moallems = [], supplierContracts = [], supplierContractPayments = [],
-  dailyCashbook = [],
+  moallems = [], supplierAgents = [], supplierContracts = [], supplierContractPayments = [],
+  dailyCashbook = [], packages = [],
 }: Props) => {
   const navigate = useNavigate();
   const canSeeProfit = useCanSeeProfit();
   const [showDueCustomers, setShowDueCustomers] = useState(false);
+  const [invoiceStats, setInvoiceStats] = useState<any>(null);
+
+  useEffect(() => {
+    if (!canSeeProfit) return;
+    fetchInvoiceStats().then(setInvoiceStats).catch(() => setInvoiceStats(null));
+  }, [canSeeProfit]);
 
   const financials = useMemo(() => {
     const activeBookings = bookings.filter(b => b.status !== "cancelled");
@@ -108,6 +120,63 @@ const AdminDashboardCharts = ({
     };
   }, [bookings, payments, expenses, accounts, moallemPayments, supplierPayments, commissionPayments, supplierContractPayments, supplierContracts, moallems, dailyCashbook]);
 
+  const moallemMap = useMemo(() => {
+    const m: Record<string, any> = {};
+    moallems.forEach((ml) => { m[ml.id] = ml; });
+    return m;
+  }, [moallems]);
+
+  const supplierMap = useMemo(() => {
+    const m: Record<string, any> = {};
+    (supplierAgents || []).forEach((sa: any) => { m[sa.id] = sa; });
+    return m;
+  }, [supplierAgents]);
+
+  const monthlyPackageProfit = useMemo(() => {
+    const rows = buildPackageProfitReport({
+      packages,
+      bookings,
+      payments,
+      expenses,
+      moallemPayments,
+      commissionPayments,
+      supplierPayments,
+      moallemMap,
+      supplierMap,
+    }, {
+      month: getMonth(new Date()),
+      year: getYear(new Date()),
+      packageId: "all",
+      serviceType: "all",
+    });
+    return summarizePackageProfit(rows);
+  }, [packages, bookings, payments, expenses, moallemPayments, commissionPayments, supplierPayments, moallemMap, supplierMap]);
+
+  const monthlyServiceProfit = useMemo(() => {
+    const rows = buildServiceProfitReport({
+      packages,
+      bookings,
+      expenses,
+      moallemPayments,
+      commissionPayments,
+      supplierPayments,
+    }, {
+      month: getMonth(new Date()),
+      year: getYear(new Date()),
+      serviceKey: "all",
+    });
+    return summarizeServiceProfit(rows);
+  }, [packages, bookings, expenses, moallemPayments, commissionPayments, supplierPayments]);
+
+  const SERVICE_ICONS: Record<string, any> = {
+    hajj: Globe,
+    umrah: Globe,
+    air_ticket: Plane,
+    hotel: Building2,
+    visa: Ticket,
+    tour: MapPin,
+  };
+
   const dueCustomers = useMemo(() => {
     const map: Record<string, { name: string; phone: string; totalDue: number; totalAmount: number; bookingCount: number; bookings: any[] }> = {};
     bookings.filter(b => b.status !== "cancelled" && Number(b.due_amount || 0) > 0).forEach(b => {
@@ -177,6 +246,107 @@ const AdminDashboardCharts = ({
           onClick={() => setShowDueCustomers(true)}
         />
       </div>
+
+      {/* ═══ ROW 1A: INVOICE STATUS ═══ */}
+      {canSeeProfit && invoiceStats && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          <KpiCard label="Draft Invoices" value={String(invoiceStats.draft_count || 0)} icon={FileText} iconBg="bg-muted" iconColor="text-muted-foreground" sub="Awaiting review" onClick={() => navigate("/admin/invoices")} />
+          <KpiCard label="Pending Approval" value={String(invoiceStats.pending_count || 0)} icon={Clock} iconBg="bg-yellow-500/10" iconColor="text-yellow-600" sub="Needs admin action" onClick={() => navigate("/admin/invoices")} />
+          <KpiCard label="Finalized" value={String(invoiceStats.finalized_count || 0)} icon={CheckCircle} iconBg="bg-blue-500/10" iconColor="text-blue-600" sub="Ready to bill" onClick={() => navigate("/admin/invoices")} />
+          <KpiCard label="Paid Invoices" value={String(invoiceStats.paid_count || 0)} icon={DollarSign} iconBg="bg-emerald-500/10" iconColor="text-emerald-500" sub="Fully collected" onClick={() => navigate("/admin/invoices")} />
+          <KpiCard label="Outstanding Due" value={formatBDT(Number(invoiceStats.total_due || 0))} icon={ArrowDownRight} iconBg="bg-destructive/10" iconColor="text-destructive" sub={`${invoiceStats.outstanding_count || 0} invoices`} onClick={() => navigate("/admin/invoices")} />
+        </div>
+      )}
+
+      {/* ═══ ROW 1B: MONTHLY SERVICE REVENUE ═══ */}
+      {canSeeProfit && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+          {SERVICE_CATEGORIES.map((s) => {
+            const Icon = SERVICE_ICONS[s.key] || Layers;
+            return (
+              <KpiCard
+                key={s.key}
+                label={`${s.label} Revenue`}
+                value={formatBDT(monthlyServiceProfit.byService[s.key].revenue)}
+                icon={Icon}
+                iconBg="bg-primary/10"
+                iconColor="text-primary"
+                sub={format(new Date(), "MMMM yyyy")}
+                onClick={() => navigate("/admin/reports")}
+              />
+            );
+          })}
+          <KpiCard
+            label="Total Expenses"
+            value={formatBDT(monthlyServiceProfit.totalExpenses)}
+            icon={ArrowDownRight}
+            iconBg="bg-destructive/10"
+            iconColor="text-destructive"
+            sub="By service type"
+            onClick={() => navigate("/admin/reports")}
+          />
+          <KpiCard
+            label="Net Profit"
+            value={formatBDT(monthlyServiceProfit.netProfit)}
+            icon={TrendingUp}
+            iconBg={monthlyServiceProfit.netProfit >= 0 ? "bg-emerald-500/10" : "bg-destructive/10"}
+            iconColor={monthlyServiceProfit.netProfit >= 0 ? "text-emerald-500" : "text-destructive"}
+            sub={`Best: ${monthlyServiceProfit.bestService}`}
+            onClick={() => navigate("/admin/reports")}
+          />
+        </div>
+      )}
+
+      {/* ═══ ROW 1C: MONTHLY PACKAGE P&L ═══ */}
+      {canSeeProfit && (
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+          <KpiCard
+            label="Monthly Package Sales"
+            value={formatBDT(monthlyPackageProfit.totalSales)}
+            icon={TrendingUp}
+            iconBg="bg-primary/10"
+            iconColor="text-primary"
+            sub={format(new Date(), "MMMM yyyy")}
+            onClick={() => navigate("/admin/reports")}
+          />
+          <KpiCard
+            label="Monthly Package Expenses"
+            value={formatBDT(monthlyPackageProfit.totalExpenses)}
+            icon={ArrowDownRight}
+            iconBg="bg-destructive/10"
+            iconColor="text-destructive"
+            sub="Linked to packages"
+            onClick={() => navigate("/admin/reports")}
+          />
+          <KpiCard
+            label="Monthly Package Profit"
+            value={formatBDT(monthlyPackageProfit.totalProfit)}
+            icon={PieChart}
+            iconBg={monthlyPackageProfit.totalProfit >= 0 ? "bg-emerald-500/10" : "bg-destructive/10"}
+            iconColor={monthlyPackageProfit.totalProfit >= 0 ? "text-emerald-500" : "text-destructive"}
+            sub="Revenue minus expenses"
+            onClick={() => navigate("/admin/reports")}
+          />
+          <KpiCard
+            label="Best Selling Package"
+            value={monthlyPackageProfit.bestSellingPackage}
+            icon={Star}
+            iconBg="bg-amber-500/10"
+            iconColor="text-amber-600"
+            sub="This month"
+            onClick={() => navigate("/admin/reports")}
+          />
+          <KpiCard
+            label="Most Profitable Package"
+            value={monthlyPackageProfit.mostProfitablePackage}
+            icon={Award}
+            iconBg="bg-emerald-500/10"
+            iconColor="text-emerald-600"
+            sub="This month"
+            onClick={() => navigate("/admin/reports")}
+          />
+        </div>
+      )}
 
       {/* ═══ ROW 2: WALLET + STATS ═══ */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

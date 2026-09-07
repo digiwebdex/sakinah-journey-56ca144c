@@ -253,10 +253,10 @@ export default function CustomerFinancialReport({ customer, open, onOpenChange }
               const company = await getCompanyInfo();
               const pdfData: CustomerPdfData = {
                 full_name: customer.full_name || "N/A",
-                phone: customer.phone, email: customer.email,
-                passport_number: customer.passport_number, nid_number: customer.nid_number,
-                address: customer.address, date_of_birth: customer.date_of_birth,
-                emergency_contact: customer.emergency_contact,
+                phone: customer.phone,
+                passport_number: customer.passport_number,
+                address: customer.address,
+                notes: customer.notes,
                 bookings: bookings.map(b => ({
                   tracking_id: b.tracking_id, package_name: b.packages?.name || "—",
                   total: Number(b.total_amount), paid: Number(b.paid_amount),

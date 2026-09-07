@@ -2,30 +2,44 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/lib/api";
 import { Search, User, X, UserPlus } from "lucide-react";
 
-interface Customer {
+export interface CustomerProfile {
   user_id: string;
   full_name: string | null;
   phone: string | null;
   email: string | null;
   passport_number: string | null;
   address: string | null;
+  nid_number?: string | null;
+  date_of_birth?: string | null;
 }
 
 interface Props {
-  onSelect: (customer: Customer | null) => void;
+  onSelect: (customer: CustomerProfile | null) => void;
   selectedId: string | null;
+  excludeUserIds?: string[];
+  onDuplicateAttempt?: (customer: CustomerProfile) => void;
+  showSelectedCard?: boolean;
+  placeholder?: string;
+  clearAfterSelect?: boolean;
 }
 
-export default function CustomerSearchSelect({ onSelect, selectedId }: Props) {
+export default function CustomerSearchSelect({
+  onSelect,
+  selectedId,
+  excludeUserIds = [],
+  onDuplicateAttempt,
+  showSelectedCard = true,
+  placeholder = "Search by name, phone, email or passport...",
+  clearAfterSelect = false,
+}: Props) {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<Customer[]>([]);
+  const [results, setResults] = useState<CustomerProfile[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [selected, setSelected] = useState<Customer | null>(null);
+  const [selected, setSelected] = useState<CustomerProfile | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
-  // Close on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
@@ -40,20 +54,31 @@ export default function CustomerSearchSelect({ onSelect, selectedId }: Props) {
     if (!q.trim()) { setResults([]); return; }
     setLoading(true);
     try {
-      const term = `%${q.trim()}%`;
       const { data } = await supabase
         .from("profiles")
-        .select("user_id, full_name, phone, email, passport_number, address")
-        .ilike("full_name", term)
+        .select("user_id, full_name, phone, email, passport_number, address, nid_number, date_of_birth")
         .order("full_name")
-        .limit(20);
-      setResults(data || []);
+        .limit(200);
+      const term = q.trim().toLowerCase();
+      const exclude = new Set(excludeUserIds);
+      const filtered = (data || [])
+        .filter((c: CustomerProfile) => !exclude.has(c.user_id))
+        .filter((c: CustomerProfile) => {
+          const name = (c.full_name || "").toLowerCase();
+          const phone = (c.phone || "").toLowerCase();
+          const passport = (c.passport_number || "").toLowerCase();
+          const email = (c.email || "").toLowerCase();
+          const nid = (c.nid_number || "").toLowerCase();
+          return name.includes(term) || phone.includes(term) || passport.includes(term) || email.includes(term) || nid.includes(term);
+        })
+        .slice(0, 20);
+      setResults(filtered);
     } catch {
       setResults([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [excludeUserIds]);
 
   const handleInputChange = (val: string) => {
     setQuery(val);
@@ -62,7 +87,17 @@ export default function CustomerSearchSelect({ onSelect, selectedId }: Props) {
     debounceRef.current = setTimeout(() => searchCustomers(val), 300);
   };
 
-  const handleSelect = (c: Customer) => {
+  const handleSelect = (c: CustomerProfile) => {
+    if (excludeUserIds.includes(c.user_id)) {
+      onDuplicateAttempt?.(c);
+      return;
+    }
+    if (clearAfterSelect) {
+      setQuery("");
+      setOpen(false);
+      onSelect(c);
+      return;
+    }
     setSelected(c);
     setQuery("");
     setOpen(false);
@@ -76,7 +111,6 @@ export default function CustomerSearchSelect({ onSelect, selectedId }: Props) {
     onSelect(null);
   };
 
-  // Sync external clear
   useEffect(() => {
     if (!selectedId && selected) {
       setSelected(null);
@@ -84,7 +118,20 @@ export default function CustomerSearchSelect({ onSelect, selectedId }: Props) {
     }
   }, [selectedId, selected]);
 
-  if (selected) {
+  useEffect(() => {
+    if (selectedId && !selected) {
+      supabase
+        .from("profiles")
+        .select("user_id, full_name, phone, email, passport_number, address, nid_number, date_of_birth")
+        .eq("user_id", selectedId)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (data) setSelected(data as CustomerProfile);
+        });
+    }
+  }, [selectedId, selected]);
+
+  if (showSelectedCard && selected) {
     return (
       <div className="flex items-center gap-3 bg-primary/5 border border-primary/20 rounded-lg p-3">
         <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
@@ -96,7 +143,7 @@ export default function CustomerSearchSelect({ onSelect, selectedId }: Props) {
             {selected.phone || ""}{selected.phone && selected.passport_number ? " — " : ""}{selected.passport_number || ""}
           </p>
         </div>
-        <button onClick={handleClear} className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors" title="সরান">
+        <button type="button" onClick={handleClear} className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors" title="Remove">
           <X className="h-4 w-4" />
         </button>
       </div>
@@ -112,27 +159,28 @@ export default function CustomerSearchSelect({ onSelect, selectedId }: Props) {
           value={query}
           onChange={(e) => handleInputChange(e.target.value)}
           onFocus={() => { if (query.trim()) setOpen(true); }}
-          placeholder="Search by name, phone, email or passport..."
+          placeholder={placeholder}
         />
       </div>
 
       {open && (
         <div className="absolute z-50 mt-1 w-full bg-popover border border-border rounded-lg shadow-lg max-h-60 overflow-y-auto">
           {loading && (
-            <div className="px-4 py-3 text-xs text-muted-foreground text-center">খুঁজছে...</div>
+            <div className="px-4 py-3 text-xs text-muted-foreground text-center">Searching...</div>
           )}
           {!loading && query.trim() && results.length === 0 && (
             <div className="px-4 py-3 text-center">
               <p className="text-xs text-muted-foreground mb-1">No customer found</p>
               <div className="flex items-center gap-1 justify-center text-xs text-primary">
                 <UserPlus className="h-3 w-3" />
-                <span>Enter details manually below</span>
+                <span>Add the customer in Customers module first</span>
               </div>
             </div>
           )}
           {!loading && results.map((c) => (
             <button
               key={c.user_id}
+              type="button"
               onClick={() => handleSelect(c)}
               className="w-full text-left px-4 py-2.5 hover:bg-accent transition-colors flex items-center gap-3 border-b border-border/50 last:border-0"
             >

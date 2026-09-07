@@ -1,28 +1,62 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
 const fsp = require('fs/promises');
 const multer = require('multer');
 const { query } = require('./config/database');
 const { authenticate, requireRole, optionalAuth } = require('./middleware/auth');
+const {
+  sanitizeStoragePath,
+  getUserRoles,
+  isStaffRole,
+  resolveUploadPath,
+  signFileAccessToken,
+  verifyFileAccessToken,
+  isAllowedUpload,
+  canAccessUploadFile,
+} = require('./middleware/security');
 const authRoutes = require('./routes/auth');
+const invoiceRoutes = require('./routes/invoices');
+const invoiceService = require('./services/invoiceService');
+const { runBootMigrations } = require('./migrations/bootstrap');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Middleware
-app.use(cors({ origin: process.env.FRONTEND_URL || '*', credentials: true }));
+app.set('trust proxy', 1);
+
+const corsOrigin = process.env.FRONTEND_URL || 'https://manasiktravelhub.com';
+app.use(cors({ origin: corsOrigin, credentials: true }));
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(express.json({ limit: '10mb' }));
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
+const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 400, standardHeaders: true, legacyHeaders: false });
+
+const uploadsRoot = path.join(__dirname, 'uploads');
+
+app.use('/uploads/company-assets', express.static(path.join(uploadsRoot, 'company-assets')));
+app.use('/uploads/hotel-images', express.static(path.join(uploadsRoot, 'hotel-images')));
+app.use('/uploads/booking-documents', (_req, res) => res.status(403).json({ error: 'Forbidden' }));
+app.use('/uploads/payment-receipts', (_req, res) => res.status(403).json({ error: 'Forbidden' }));
 
 // File upload config
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, path.join(__dirname, 'uploads')),
-  filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
+  destination: (req, file, cb) => cb(null, uploadsRoot),
+  filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname.replace(/[^\w.\-()+ ]/g, '_')}`),
 });
-const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } });
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (isAllowedUpload(file)) cb(null, true);
+    else cb(new Error('Unsupported file type. Allowed: JPG, PNG, GIF, WEBP, PDF'));
+  },
+});
 
 const toLocalPhone = (value = '') => {
   const digits = String(value).replace(/\D/g, '');
@@ -76,7 +110,11 @@ const isSmsAccepted = (responseText = '') => {
 // =============================================
 // AUTH ROUTES
 // =============================================
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/forgot-password', authLimiter);
+app.use('/api/auth/reset-password', authLimiter);
 app.use('/api/auth', authRoutes);
+app.use('/api/', apiLimiter);
 
 // =============================================
 // GENERIC CRUD HELPER
@@ -579,11 +617,13 @@ app.get('/api/supplier-agent-payments', authenticate, async (req, res) => {
     });
     let sql = `SELECT sp.*,
       CASE WHEN sa.id IS NOT NULL THEN json_build_object('agent_name', sa.agent_name, 'company_name', sa.company_name) ELSE NULL END as supplier_agents,
-      CASE WHEN b.id IS NOT NULL THEN json_build_object('tracking_id', b.tracking_id, 'total_amount', b.total_amount, 'total_cost', b.total_cost, 'paid_to_supplier', b.paid_to_supplier, 'supplier_due', b.supplier_due, 'guest_name', b.guest_name, 'packages', json_build_object('name', p.name, 'type', p.type)) ELSE NULL END as bookings
+      CASE WHEN pkg.id IS NOT NULL THEN json_build_object('name', pkg.name, 'type', pkg.type) ELSE NULL END as packages,
+      CASE WHEN b.id IS NOT NULL THEN json_build_object('tracking_id', b.tracking_id, 'total_amount', b.total_amount, 'total_cost', b.total_cost, 'paid_to_supplier', b.paid_to_supplier, 'supplier_due', b.supplier_due, 'guest_name', b.guest_name, 'packages', json_build_object('name', bp.name, 'type', bp.type)) ELSE NULL END as bookings
       FROM supplier_agent_payments sp
       LEFT JOIN supplier_agents sa ON sp.supplier_agent_id = sa.id
+      LEFT JOIN packages pkg ON sp.package_id = pkg.id
       LEFT JOIN bookings b ON sp.booking_id = b.id
-      LEFT JOIN packages p ON b.package_id = p.id`;
+      LEFT JOIN packages bp ON b.package_id = bp.id`;
     if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
     sql += ` ORDER BY sp.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
     params.push(Number(limit) || 1000, Number(offset) || 0);
@@ -624,6 +664,8 @@ app.use('/api/daily-cashbook', createCrudRoutes('daily_cashbook', { adminOnly: t
 app.use('/api/refunds', createCrudRoutes('refunds', { adminOnly: true }));
 app.use('/api/cancellation-policies', createCrudRoutes('cancellation_policies', { readAuth: false, writeAuth: true, adminOnly: true }));
 
+app.use('/api/invoices', invoiceRoutes);
+
 // ==============================================
 // BACKUP / RESTORE ROUTES
 // =============================================
@@ -638,7 +680,7 @@ const BACKUP_TABLES = [
   'notification_logs', 'notification_settings',
   'user_roles', 'site_content', 'company_settings',
   'blog_posts', 'cms_versions', 'daily_cashbook',
-  'cancellation_policies', 'refunds',
+  'cancellation_policies', 'refunds', 'invoices', 'invoice_audit_log', 'invoice_sequences',
 ];
 
 const RESTORE_ORDER = [
@@ -869,18 +911,8 @@ app.get('/api/track/:trackingId', async (req, res) => {
   }
 });
 
-// File + Storage helpers
-const sanitizeStoragePath = (input = '') =>
-  String(input)
-    .replace(/\\/g, '/')
-    .split('/')
-    .filter((p) => p && p !== '.' && p !== '..')
-    .join('/');
-
-const uploadsRoot = path.join(__dirname, 'uploads');
-
 // File upload
-app.post('/api/upload', optionalAuth, upload.single('file'), async (req, res) => {
+app.post('/api/upload', authenticate, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
@@ -898,7 +930,39 @@ app.post('/api/upload', optionalAuth, upload.single('file'), async (req, res) =>
       file_size: req.file.size,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/files/sign', authenticate, async (req, res) => {
+  try {
+    const bucket = sanitizeStoragePath(req.body?.bucket || '');
+    const filePath = sanitizeStoragePath(req.body?.path || '');
+    if (!bucket || !filePath) return res.status(400).json({ error: 'bucket and path required' });
+
+    const roles = await getUserRoles(req.user.id);
+    const allowed = await canAccessUploadFile(req.user.id, roles, bucket, filePath);
+    if (!allowed) return res.status(403).json({ error: 'Forbidden' });
+
+    const token = signFileAccessToken({ bucket, path: filePath });
+    res.json({ signedUrl: `/api/files/download?token=${encodeURIComponent(token)}` });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/files/download', async (req, res) => {
+  try {
+    const token = String(req.query.token || '');
+    if (!token) return res.status(400).json({ error: 'token required' });
+
+    const decoded = verifyFileAccessToken(token);
+    const { absolute } = resolveUploadPath(uploadsRoot, decoded.bucket, decoded.path);
+    if (!fs.existsSync(absolute)) return res.status(404).json({ error: 'File not found' });
+
+    res.sendFile(absolute);
+  } catch (err) {
+    res.status(403).json({ error: 'Forbidden' });
   }
 });
 
@@ -1008,6 +1072,12 @@ app.post('/api/create-guest-booking', async (req, res) => {
     );
 
     const booking = bookingResult.rows[0];
+
+    try {
+      await invoiceService.syncInvoiceFromBooking(booking.id, null);
+    } catch (invoiceErr) {
+      console.error('Guest booking invoice sync failed:', invoiceErr.message);
+    }
 
     // Generate installment schedule if plan selected
     if (installment_plan_id) {
@@ -1535,7 +1605,14 @@ app.get('*', (req, res) => {
 // =============================================
 // START
 // =============================================
-app.listen(PORT, () => {
-  console.log(`🚀 Manasik Travel Hub API running on port ${PORT}`);
-  console.log(`📁 Serving frontend from ${frontendPath}`);
-});
+runBootMigrations()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`🚀 Manasik Travel Hub API running on port ${PORT}`);
+      console.log(`📁 Serving frontend from ${frontendPath}`);
+    });
+  })
+  .catch((err) => {
+    console.error('Boot migration failed:', err.message);
+    process.exit(1);
+  });

@@ -424,18 +424,26 @@ export function addPdfFooter(doc: jsPDF, cfg: PdfCompanyConfig, options?: { show
 // ═══════════════════════════════════════════════════════════════
 // SIGNATURE BLOCK — Clean lines matching sample
 // ═══════════════════════════════════════════════════════════════
-export function addSignatureBlock(doc: jsPDF, sig: SignatureData, y: number): number {
+export function addSignatureBlock(
+  doc: jsPDF,
+  sig: SignatureData,
+  y: number,
+  options?: { leftLabel?: string }
+): number {
   const pw = getPageWidth(doc);
   let lineY = ensurePageSpace(doc, y + 10, 20, 44);
   if (lineY < 44) lineY = 44;
 
   const leftLineStart = MARGIN;
   const leftLineEnd = MARGIN + 70;
+  const leftCenter = (leftLineStart + leftLineEnd) / 2;
   const rightLineStart = pw - MARGIN - 70;
   const rightLineEnd = pw - MARGIN;
   const rightCenter = (rightLineStart + rightLineEnd) / 2;
 
-  // Signature images above the right line
+  const leftLabel = options?.leftLabel ?? "Customer Signature";
+
+  // Company stamp + signature above the right line
   if (sig.stamp_base64) {
     try { doc.addImage(sig.stamp_base64, "PNG", rightCenter - 14, lineY - 30, 28, 28); } catch { /* skip */ }
   }
@@ -450,12 +458,13 @@ export function addSignatureBlock(doc: jsPDF, sig: SignatureData, y: number): nu
   doc.line(rightLineStart, lineY, rightLineEnd, lineY);
   doc.setLineWidth(0.2);
 
-  // Labels
+  // Left label (blank line for external party to sign)
   doc.setFontSize(8);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(DARK.r, DARK.g, DARK.b);
-  doc.text("Customer Signature", leftLineStart, lineY + 5);
+  doc.text(leftLabel, leftCenter, lineY + 5, { align: "center" });
 
+  // Right label — authorized signatory
   if (sig.authorized_name) {
     doc.setFont("helvetica", "bold");
     doc.text(sig.authorized_name, rightCenter, lineY + 5, { align: "center" });
@@ -531,45 +540,51 @@ export function addBillToAndMeta(
   doc: jsPDF, y: number,
   billToFields: { label: string; value: string }[],
   metaFields: { label: string; value: string }[],
-  options?: { title?: string }
+  options?: { title?: string; leftHeading?: string; titleSize?: number }
 ): number {
   const pw = getPageWidth(doc);
   const leftX = MARGIN;
   const rightEdge = pw - MARGIN;
+  const contentW = pw - MARGIN * 2;
+  const splitX = leftX + contentW * 0.50;
   const title = (options?.title || "INVOICE").toUpperCase();
+  const leftHeading = options?.leftHeading || "BILL TO";
 
-  // ── RIGHT: Large orange title — clear gap below QR tab
+  const resolveTitleSize = () => {
+    if (options?.titleSize) return options.titleSize;
+    if (title === "INVOICE") return 38;
+    if (title.length > 18) return 20;
+    if (title.length > 12) return 22;
+    return 24;
+  };
+  const titleSize = resolveTitleSize();
+
   const qrTabBottom = HEADER_TOP_GAP - 5 + QR_TAB_HEIGHT;
   const titleY = Math.max(y + 6, qrTabBottom + 15);
-  doc.setFontSize(38);
+  doc.setFontSize(titleSize);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(BRAND_ORANGE.r, BRAND_ORANGE.g, BRAND_ORANGE.b);
   doc.text(title, rightEdge, titleY, { align: "right" });
-  const titleWidth = doc.getTextWidth(title);
-  const metaLeftX = rightEdge - titleWidth;
+  const metaLeftX = splitX + 4;
 
-  // ── LEFT: BILL TO heading ──
   doc.setFontSize(13);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(BRAND_ORANGE.r, BRAND_ORANGE.g, BRAND_ORANGE.b);
-  doc.text("BILL TO :", leftX, y + 6);
+  doc.text(`${leftHeading} :`, leftX, y + 6);
 
-  // ── LEFT: Bill-to fields (label : value) ──
   let fieldY = y + 14;
   doc.setFontSize(10.5);
   doc.setTextColor(DARK.r, DARK.g, DARK.b);
   doc.setFont("helvetica", "normal");
 
-  // Column-align the colon position
   let maxLabelW = 0;
   billToFields.forEach((f) => {
     const w = doc.getTextWidth(f.label);
     if (w > maxLabelW) maxLabelW = w;
   });
   const colonX = leftX + maxLabelW + 3;
+  const leftValueMaxW = splitX - colonX - 6;
 
-  // Sanitize: replace Bengali Taka (৳) with "BDT" so helvetica renders cleanly
-  // (avoids letter-spacing / fallback issues in jsPDF when a single Bengali char appears in Latin text)
   const sanitizeForLatin = (v: string) =>
     (v || "").replace(/৳\s*/g, "BDT ").replace(/[\u0980-\u09FF]/g, "");
 
@@ -578,11 +593,17 @@ export function addBillToAndMeta(
     doc.text(f.label, leftX, fieldY);
     doc.text(":", colonX, fieldY);
     const safeVal = sanitizeForLatin(f.value || "N/A") || "N/A";
-    doc.text(safeVal, colonX + 3, fieldY);
+    const lines = doc.splitTextToSize(safeVal, leftValueMaxW);
+    doc.text(lines[0] || safeVal, colonX + 3, fieldY);
+    if (lines.length > 1) {
+      for (let i = 1; i < lines.length; i++) {
+        fieldY += 6.2;
+        doc.text(lines[i], colonX + 3, fieldY);
+      }
+    }
     fieldY += 6.2;
   });
 
-  // ── RIGHT: Metadata — same width & right edge as INVOICE title above
   let metaY = titleY + 12;
   doc.setFontSize(10);
   doc.setTextColor(DARK.r, DARK.g, DARK.b);
@@ -787,9 +808,60 @@ export async function addInfoBox(doc: jsPDF, y: number, fields: InfoField[], tit
   return y + totalH + 2;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// FINANCIAL SUMMARY (right-aligned like sample)
-// ═══════════════════════════════════════════════════════════════
+/** Two stacked cards (gray + beige) — matches booking invoice financial summary */
+export function addFinancialSummary(
+  doc: jsPDF, y: number,
+  grossAmount: number, discount: number, netTotal: number,
+  paidAmount: number, dueAmount: number
+): number {
+  const pw = getPageWidth(doc);
+  const boxW = 95;
+  const boxX = pw - MARGIN - boxW;
+
+  const card1H = 26;
+  doc.setFillColor(FINANCIAL_CARD_GRAY.r, FINANCIAL_CARD_GRAY.g, FINANCIAL_CARD_GRAY.b);
+  doc.rect(boxX, y, boxW, card1H, "F");
+
+  const labelX = boxX + 6;
+  const valueX = boxX + boxW - 6;
+  let iy = y + 7;
+
+  doc.setFontSize(9.5);
+  doc.setTextColor(DARK.r, DARK.g, DARK.b);
+
+  doc.setFont("helvetica", "normal");
+  doc.text("Gross Amount :", labelX, iy);
+  doc.text(`BDT ${fmtAmount(grossAmount)}`, valueX, iy, { align: "right" });
+  iy += 7;
+
+  doc.text("Discount        :", labelX, iy);
+  doc.text(`BDT ${fmtAmount(discount)}`, valueX, iy, { align: "right" });
+  iy += 7;
+
+  doc.setFont("helvetica", "bold");
+  doc.text("Net Total       :", labelX, iy);
+  doc.text(fmtAmount(netTotal), valueX, iy, { align: "right" });
+
+  const gap = 3;
+  const card2Y = y + card1H + gap;
+  const card2H = 19;
+  doc.setFillColor(FINANCIAL_CARD_ORANGE.r, FINANCIAL_CARD_ORANGE.g, FINANCIAL_CARD_ORANGE.b);
+  doc.rect(boxX, card2Y, boxW, card2H, "F");
+
+  let jy = card2Y + 7;
+  doc.setFont("helvetica", "normal");
+  doc.text("Paid Amount  :", labelX, jy);
+  doc.text(`BDT ${fmtAmount(paidAmount)}`, valueX, jy, { align: "right" });
+  jy += 7;
+
+  doc.setFont("helvetica", "bold");
+  doc.text("Due Amount  :", labelX, jy);
+  doc.text(fmtAmount(dueAmount), valueX, jy, { align: "right" });
+
+  doc.setTextColor(0);
+  return card2Y + card2H + 6;
+}
+
 export function addFinancialBox(
   doc: jsPDF, y: number,
   items: { label: string; value: string; bold?: boolean }[],
@@ -909,6 +981,11 @@ export interface PdfTableOptions {
   variant?: "default" | "invoice";
 }
 
+export const INVOICE_TABLE: Pick<PdfTableOptions, "variant" | "fontSize"> = {
+  variant: "invoice",
+  fontSize: 9,
+};
+
 const getTableCellText = (data: any): string => {
   if (Array.isArray(data?.cell?.text) && data.cell.text.length > 0) {
     return data.cell.text.join(" ");
@@ -981,9 +1058,9 @@ export function addTable(doc: jsPDF, options: PdfTableOptions): number {
 // ═══════════════════════════════════════════════════════════════
 export function addRawTable(doc: jsPDF, options: PdfTableOptions): number {
   const isInvoice = options.variant === "invoice";
-  const bodyLineColor = isInvoice ? [255, 255, 255] as [number, number, number] : [220, 220, 220];
-  const bodyFill = isInvoice
-    ? [TABLE_ROW_BG.r, TABLE_ROW_BG.g, TABLE_ROW_BG.b] as [number, number, number]
+  const bodyLineColor: [number, number, number] = isInvoice ? [255, 255, 255] : [220, 220, 220];
+  const bodyFill: [number, number, number] = isInvoice
+    ? [TABLE_ROW_BG.r, TABLE_ROW_BG.g, TABLE_ROW_BG.b]
     : [255, 255, 255];
 
   autoTable(doc, {
