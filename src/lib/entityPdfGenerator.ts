@@ -266,7 +266,7 @@ export async function generateSupplierPdf(data: SupplierPdfData, _company: Compa
     data.summary.totalPaid, data.summary.totalDue
   );
 
-  y = addSignatureBlock(doc, sig, y);
+  y = addSignatureBlock(doc, sig, y, { leftLabel: "Supplier Signature" });
   addPdfFooter(doc, cfg);
   doc.save(buildFileName("Supplier", data.agent_name));
 }

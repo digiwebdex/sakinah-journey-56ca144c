@@ -132,11 +132,9 @@ export default function AdminCustomersPage() {
 
   const saveEdit = async () => {
     if (!editId) return;
-    if (editForm.phone?.trim()) {
-      const phoneErr = getPhoneError(editForm.phone, false);
-      if (phoneErr) { toast.error(phoneErr); return; }
-    }
-    const normalizedPhone = editForm.phone?.trim() ? normalizePhone(editForm.phone) : null;
+    const phoneErr = getPhoneError(editForm.phone || "", true);
+    if (phoneErr) { toast.error(phoneErr); return; }
+    const normalizedPhone = normalizePhone(editForm.phone);
     const { error } = await supabase.from("profiles").update({
       full_name: editForm.full_name || null, phone: normalizedPhone,
       email: editForm.email || null, address: editForm.address || null,
@@ -396,9 +394,9 @@ export default function AdminCustomersPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div><label className="text-xs text-muted-foreground block mb-1">Name *</label>
                 <input className={inputClass} value={editForm.full_name} onChange={e => setEditForm({ ...editForm, full_name: e.target.value })} /></div>
-              <div><label className="text-xs text-muted-foreground block mb-1">Phone</label>
-                <input className={inputClass} value={editForm.phone} onChange={e => handlePhoneChange(e.target.value, v => setEditForm({ ...editForm, phone: v }))} placeholder="01XXXXXXXXX" maxLength={15} />
-                {editForm.phone?.trim() && getPhoneError(editForm.phone) && <p className="text-xs text-destructive mt-1">{getPhoneError(editForm.phone)}</p>}</div>
+              <div><label className="text-xs text-muted-foreground block mb-1">Phone *</label>
+                <input className={inputClass} value={editForm.phone} onChange={e => handlePhoneChange(e.target.value, v => setEditForm({ ...editForm, phone: v }))} placeholder="01XXXXXXXXX" maxLength={15} required />
+                {getPhoneError(editForm.phone || "", true) && <p className="text-xs text-destructive mt-1">{getPhoneError(editForm.phone || "", true)}</p>}</div>
               <div><label className="text-xs text-muted-foreground block mb-1">Email</label>
                 <input className={inputClass} type="email" value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} /></div>
               <div><label className="text-xs text-muted-foreground block mb-1">Passport No.</label>

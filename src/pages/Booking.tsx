@@ -12,6 +12,7 @@ import bankTransferLogo from "@/assets/payment/bank-transfer.png";
 import sslcommerzLogo from "@/assets/payment/sslcommerz.png";
 import BankAccountDetails, { BankAccountListSummary } from "@/components/payment/BankAccountDetails";
 import { normalizeBankAccounts } from "@/lib/paymentMethods";
+import { getPhoneError } from "@/lib/phoneValidation";
 
 const PAYMENT_LOGOS: Record<string, string> = {
   bkash: bkashLogo,
@@ -245,8 +246,9 @@ const Booking = () => {
         toast.error(t("booking.nameRequired"));
         return false;
       }
-      if (!personalInfo.phone.trim()) {
-        toast.error(t("booking.phoneRequired"));
+      const phoneError = getPhoneError(personalInfo.phone, true);
+      if (phoneError) {
+        toast.error(phoneError === "Phone number is required." ? t("booking.phoneRequired") : phoneError);
         return false;
       }
     }

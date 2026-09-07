@@ -11,6 +11,7 @@ import { syncInvoiceFromBooking } from "@/lib/invoiceRecords";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { getPhoneError } from "@/lib/phoneValidation";
 
 const inputClass =
   "w-full bg-secondary border border-border rounded-md px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40";
@@ -368,6 +369,8 @@ export default function AdminCreateBookingPage() {
 
   const handleSubmit = async () => {
     if (!selectedCustomerId) { toast.error("Please select a customer"); return; }
+    const phoneErr = getPhoneError(form.guest_phone || "", true);
+    if (phoneErr) { toast.error(`Customer phone: ${phoneErr}`); return; }
     if (bookingType === "individual" && !form.package_id) { toast.error("Please select a package"); return; }
     if (bookingType === "family" && members.length === 0) { toast.error("Please add family members"); return; }
     if (bookingType === "family") {

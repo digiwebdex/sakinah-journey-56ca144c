@@ -16,7 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import AdminActionMenu, { ActionItem } from "@/components/admin/AdminActionMenu";
-import { handlePhoneChange } from "@/lib/phoneValidation";
+import { handlePhoneChange, getPhoneError } from "@/lib/phoneValidation";
 import CustomerSearchSelect from "@/components/admin/CustomerSearchSelect";
 import { format } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -289,6 +289,7 @@ export default function AdminBookingsPage() {
   const [statusChangeVal, setStatusChangeVal] = useState("");
   const [bookingPayments, setBookingPayments] = useState<Record<string, any[]>>({});
   const [editMembers, setEditMembers] = useState<any[]>([]);
+  const [deletedMemberIds, setDeletedMemberIds] = useState<string[]>([]);
   const [bookingDocs, setBookingDocs] = useState<Record<string, any[]>>({});
   const [inlineStatusId, setInlineStatusId] = useState<string | null>(null);
   const [docReviewBooking, setDocReviewBooking] = useState<any>(null);
@@ -486,6 +487,7 @@ export default function AdminBookingsPage() {
 
     const hydratedMembers = existingMembers.length > 0 ? existingMembers : (shouldUseFamily ? fallbackMembers : []);
     setEditMembers(hydratedMembers);
+    setDeletedMemberIds([]);
 
     if (shouldUseFamily) {
       setEditForm((prev: any) => ({
@@ -507,6 +509,8 @@ export default function AdminBookingsPage() {
 
   const saveEdit = async () => {
     if (!editingId) return;
+    const phoneErr = getPhoneError(editForm.guest_phone || "", true);
+    if (phoneErr) { toast.error(`Phone: ${phoneErr}`); return; }
     const isFamily = isFamilyBooking(editForm.booking_type, editMembers.length);
     const sellingPP = toMoney(editForm.selling_price_per_person);
     const costPP = toMoney(editForm.cost_price_per_person);
@@ -542,6 +546,12 @@ export default function AdminBookingsPage() {
     const paid = Math.min(toMoney(editForm.paid_amount), totalSelling);
     const due = Math.max(0, totalSelling - paid);
     const profit = totalSelling - totalCostVal - totalCommVal - extraExp;
+
+    // Delete members that were removed in the UI.
+    if (deletedMemberIds.length > 0) {
+      const { error: delErr } = await supabase.from("booking_members").delete().in("id", deletedMemberIds);
+      if (delErr) { toast.error(`Failed to remove member: ${delErr.message}`); return; }
+    }
 
     if (isFamily && preparedMembers.length > 0) {
       const memberResults = await Promise.all(
@@ -604,6 +614,7 @@ export default function AdminBookingsPage() {
     toast.success("Booking updated successfully");
     setEditingId(null);
     setEditMembers([]);
+    setDeletedMemberIds([]);
     fetchBookings();
     fetchAllPayments();
   };
@@ -981,7 +992,7 @@ export default function AdminBookingsPage() {
 
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                           <div><label className="text-xs text-muted-foreground block mb-1">Customer Name</label><input className={inputClass} value={editForm.guest_name} onChange={(e) => setEditForm({ ...editForm, guest_name: e.target.value })} /></div>
-                          <div><label className="text-xs text-muted-foreground block mb-1">Phone</label><input className={inputClass} value={editForm.guest_phone} onChange={(e) => handlePhoneChange(e.target.value, (v) => setEditForm({ ...editForm, guest_phone: v }))} maxLength={15} /></div>
+                          <div><label className="text-xs text-muted-foreground block mb-1">Phone *</label><input className={inputClass} value={editForm.guest_phone} onChange={(e) => handlePhoneChange(e.target.value, (v) => setEditForm({ ...editForm, guest_phone: v }))} maxLength={15} required /></div>
                           <div><label className="text-xs text-muted-foreground block mb-1">Passport</label><input className={inputClass} value={editForm.guest_passport} onChange={(e) => setEditForm({ ...editForm, guest_passport: e.target.value })} /></div>
                         </div>
 
@@ -1012,13 +1023,25 @@ export default function AdminBookingsPage() {
                               </div>
                             </div>
                             {editMembers.map((m: any, idx: number) => (
-                              <div key={m.id || m.temp_id || `member-${idx}`} className="grid grid-cols-2 sm:grid-cols-6 gap-2 bg-secondary/30 rounded-md p-2">
-                                <div><label className="text-[10px] text-muted-foreground block mb-0.5">Name</label><input className={inputClass + " text-xs"} value={m.full_name} onChange={(e) => { const u = [...editMembers]; u[idx] = { ...u[idx], full_name: e.target.value }; setEditMembers(u); }} /></div>
-                                <div><label className="text-[10px] text-muted-foreground block mb-0.5">Passport</label><input className={inputClass + " text-xs"} value={m.passport_number || ""} onChange={(e) => { const u = [...editMembers]; u[idx] = { ...u[idx], passport_number: e.target.value }; setEditMembers(u); }} /></div>
-                                <div><label className="text-[10px] text-muted-foreground block mb-0.5">Package</label><div className={`${inputClass} text-xs bg-muted/50`}>{b.packages?.name || "N/A"}</div></div>
-                                <div><label className="text-[10px] text-muted-foreground block mb-0.5">Selling</label><input className={inputClass + " text-xs"} type="number" min={0} value={m.selling_price} onChange={(e) => { const u = [...editMembers]; const sp = toMoney(e.target.value); const d = Math.min(toMoney(u[idx].discount), sp); u[idx] = { ...u[idx], selling_price: sp, discount: d, final_price: Math.max(0, sp - d) }; setEditMembers(u); }} /></div>
-                                <div><label className="text-[10px] text-muted-foreground block mb-0.5">Discount</label><input className={inputClass + " text-xs"} type="number" min={0} value={m.discount} onChange={(e) => { const u = [...editMembers]; const s = toMoney(u[idx].selling_price); const d = Math.min(toMoney(e.target.value), s); u[idx] = { ...u[idx], discount: d, final_price: Math.max(0, s - d) }; setEditMembers(u); }} /></div>
-                                <div><label className="text-[10px] text-muted-foreground block mb-0.5">Final</label><div className={`${inputClass} bg-muted/50 font-bold text-xs`}>৳{Number(m.final_price || 0).toLocaleString("en-IN")}</div></div>
+                              <div key={m.id || m.temp_id || `member-${idx}`} className="flex items-end gap-2 bg-secondary/30 rounded-md p-2">
+                                <div className="flex-[2] min-w-0"><label className="text-[10px] text-muted-foreground block mb-0.5">Name</label><input className={inputClass + " text-xs"} value={m.full_name} onChange={(e) => { const u = [...editMembers]; u[idx] = { ...u[idx], full_name: e.target.value }; setEditMembers(u); }} /></div>
+                                <div className="flex-[1.5] min-w-0"><label className="text-[10px] text-muted-foreground block mb-0.5">Passport</label><input className={inputClass + " text-xs"} value={m.passport_number || ""} onChange={(e) => { const u = [...editMembers]; u[idx] = { ...u[idx], passport_number: e.target.value }; setEditMembers(u); }} /></div>
+                                <div className="flex-[2] min-w-0"><label className="text-[10px] text-muted-foreground block mb-0.5">Package</label><div className={`${inputClass} text-xs bg-muted/50 truncate`}>{b.packages?.name || "N/A"}</div></div>
+                                <div className="flex-1 min-w-0"><label className="text-[10px] text-muted-foreground block mb-0.5">Selling</label><input className={inputClass + " text-xs"} type="number" min={0} value={m.selling_price} onChange={(e) => { const u = [...editMembers]; const sp = toMoney(e.target.value); const d = Math.min(toMoney(u[idx].discount), sp); u[idx] = { ...u[idx], selling_price: sp, discount: d, final_price: Math.max(0, sp - d) }; setEditMembers(u); }} /></div>
+                                <div className="flex-1 min-w-0"><label className="text-[10px] text-muted-foreground block mb-0.5">Discount</label><input className={inputClass + " text-xs"} type="number" min={0} value={m.discount} onChange={(e) => { const u = [...editMembers]; const s = toMoney(u[idx].selling_price); const d = Math.min(toMoney(e.target.value), s); u[idx] = { ...u[idx], discount: d, final_price: Math.max(0, s - d) }; setEditMembers(u); }} /></div>
+                                <div className="flex-1 min-w-0"><label className="text-[10px] text-muted-foreground block mb-0.5">Final</label><div className={`${inputClass} bg-muted/50 font-bold text-xs`}>৳{Number(m.final_price || 0).toLocaleString("en-IN")}</div></div>
+                                <button
+                                  type="button"
+                                  title="Remove member"
+                                  onClick={() => {
+                                    if (m.id) setDeletedMemberIds((prev) => [...prev, m.id]);
+                                    setEditMembers((prev: any[]) => prev.filter((_: any, i: number) => i !== idx));
+                                    setEditForm((prev: any) => ({ ...prev, num_travelers: Math.max(1, Number(prev.num_travelers || 1) - 1) }));
+                                  }}
+                                  className="shrink-0 mb-0.5 p-1.5 rounded-md bg-destructive/10 text-destructive hover:bg-destructive hover:text-white transition-colors"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
                               </div>
                             ))}
                             {editMembers.length > 0 && <div className="text-right text-xs font-bold text-primary">Members Total: ৳{editMembers.reduce((s: number, m: any) => s + Number(m.final_price || 0), 0).toLocaleString("en-IN")}</div>}

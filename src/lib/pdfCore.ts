@@ -424,18 +424,26 @@ export function addPdfFooter(doc: jsPDF, cfg: PdfCompanyConfig, options?: { show
 // ═══════════════════════════════════════════════════════════════
 // SIGNATURE BLOCK — Clean lines matching sample
 // ═══════════════════════════════════════════════════════════════
-export function addSignatureBlock(doc: jsPDF, sig: SignatureData, y: number): number {
+export function addSignatureBlock(
+  doc: jsPDF,
+  sig: SignatureData,
+  y: number,
+  options?: { leftLabel?: string }
+): number {
   const pw = getPageWidth(doc);
   let lineY = ensurePageSpace(doc, y + 10, 20, 44);
   if (lineY < 44) lineY = 44;
 
   const leftLineStart = MARGIN;
   const leftLineEnd = MARGIN + 70;
+  const leftCenter = (leftLineStart + leftLineEnd) / 2;
   const rightLineStart = pw - MARGIN - 70;
   const rightLineEnd = pw - MARGIN;
   const rightCenter = (rightLineStart + rightLineEnd) / 2;
 
-  // Signature images above the right line
+  const leftLabel = options?.leftLabel ?? "Customer Signature";
+
+  // Company stamp + signature above the right line
   if (sig.stamp_base64) {
     try { doc.addImage(sig.stamp_base64, "PNG", rightCenter - 14, lineY - 30, 28, 28); } catch { /* skip */ }
   }
@@ -450,12 +458,13 @@ export function addSignatureBlock(doc: jsPDF, sig: SignatureData, y: number): nu
   doc.line(rightLineStart, lineY, rightLineEnd, lineY);
   doc.setLineWidth(0.2);
 
-  // Labels
+  // Left label (blank line for external party to sign)
   doc.setFontSize(8);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(DARK.r, DARK.g, DARK.b);
-  doc.text("Customer Signature", leftLineStart, lineY + 5);
+  doc.text(leftLabel, leftCenter, lineY + 5, { align: "center" });
 
+  // Right label — authorized signatory
   if (sig.authorized_name) {
     doc.setFont("helvetica", "bold");
     doc.text(sig.authorized_name, rightCenter, lineY + 5, { align: "center" });
@@ -1049,9 +1058,9 @@ export function addTable(doc: jsPDF, options: PdfTableOptions): number {
 // ═══════════════════════════════════════════════════════════════
 export function addRawTable(doc: jsPDF, options: PdfTableOptions): number {
   const isInvoice = options.variant === "invoice";
-  const bodyLineColor = isInvoice ? [255, 255, 255] as [number, number, number] : [220, 220, 220];
-  const bodyFill = isInvoice
-    ? [TABLE_ROW_BG.r, TABLE_ROW_BG.g, TABLE_ROW_BG.b] as [number, number, number]
+  const bodyLineColor: [number, number, number] = isInvoice ? [255, 255, 255] : [220, 220, 220];
+  const bodyFill: [number, number, number] = isInvoice
+    ? [TABLE_ROW_BG.r, TABLE_ROW_BG.g, TABLE_ROW_BG.b]
     : [255, 255, 255];
 
   autoTable(doc, {

@@ -13,6 +13,7 @@ import DocumentUpload from "@/components/DocumentUpload";
 import { useSessionTimeout } from "@/hooks/useSessionTimeout";
 import { generateInvoice, generateReceipt, CompanyInfo, InvoicePayment } from "@/lib/invoiceGenerator";
 import { useLanguage } from "@/i18n/LanguageContext";
+import { getPhoneError, normalizePhone } from "@/lib/phoneValidation";
 
 interface Booking {
   id: string;
@@ -114,12 +115,14 @@ const Dashboard = () => {
 
   const handleSaveProfile = async () => {
     if (!profileForm.full_name.trim()) { toast.error(t("dashboard.nameRequired")); return; }
+    const phoneError = getPhoneError(profileForm.phone, true);
+    if (phoneError) { toast.error(phoneError); return; }
     setSavingProfile(true);
     const { error } = await supabase
       .from("profiles")
       .update({
         full_name: profileForm.full_name.trim(),
-        phone: profileForm.phone.trim() || null,
+        phone: normalizePhone(profileForm.phone),
         passport_number: profileForm.passport_number.trim() || null,
         address: profileForm.address.trim() || null,
       })
@@ -710,10 +713,11 @@ const Dashboard = () => {
                   />
                 </div>
                 <div>
-                  <label className="text-sm text-muted-foreground mb-1 block">{t("dashboard.phone")}</label>
+                  <label className="text-sm text-muted-foreground mb-1 block">{t("dashboard.phone")} *</label>
                   <input
                     type="tel"
                     maxLength={15}
+                    required
                     value={profileForm.phone}
                     onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
                     className={inputClass}

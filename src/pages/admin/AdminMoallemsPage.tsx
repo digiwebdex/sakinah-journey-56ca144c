@@ -83,12 +83,10 @@ export default function AdminMoallemsPage() {
 
   const handleSave = async () => {
     if (!form.name.trim()) { toast({ title: "Name is required.", variant: "destructive" }); return; }
-    if (form.phone.trim()) {
-      const phoneErr = getPhoneError(form.phone);
-      if (phoneErr) { toast({ title: phoneErr, variant: "destructive" }); return; }
-    }
+    const phoneErr = getPhoneError(form.phone, true);
+    if (phoneErr) { toast({ title: phoneErr, variant: "destructive" }); return; }
     const payload = {
-      name: form.name.trim(), phone: form.phone.trim() ? normalizePhone(form.phone) : null,
+      name: form.name.trim(), phone: normalizePhone(form.phone),
       address: form.address.trim() || null, nid_number: form.nid_number.trim() || null,
       contract_date: form.contract_date || null, notes: form.notes.trim() || null, status: form.status,
       contracted_hajji: parseInt(form.contracted_hajji) || 0,
@@ -342,9 +340,9 @@ export default function AdminMoallemsPage() {
           <div className="space-y-3">
             <div><label className="text-sm font-medium">Name *</label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></div>
             <div>
-              <label className="text-sm font-medium">Phone</label>
-              <Input value={form.phone} onChange={e => handlePhoneChange(e.target.value, (v) => setForm({ ...form, phone: v }))} placeholder="01XXXXXXXXX" maxLength={15} />
-              {form.phone.trim() && getPhoneError(form.phone) && <p className="text-xs text-destructive mt-1">{getPhoneError(form.phone)}</p>}
+              <label className="text-sm font-medium">Phone <span className="text-destructive">*</span></label>
+              <Input value={form.phone} onChange={e => handlePhoneChange(e.target.value, (v) => setForm({ ...form, phone: v }))} placeholder="01XXXXXXXXX" maxLength={15} required />
+              {getPhoneError(form.phone, true) && <p className="text-xs text-destructive mt-1">{getPhoneError(form.phone, true)}</p>}
             </div>
             <div><label className="text-sm font-medium">Address</label><Input value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} /></div>
             <div><label className="text-sm font-medium">NID Number</label><Input value={form.nid_number} onChange={e => setForm({ ...form, nid_number: e.target.value })} /></div>
