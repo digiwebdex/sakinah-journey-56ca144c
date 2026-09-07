@@ -21,6 +21,13 @@ interface AdminActionMenuProps {
   actions: ActionItem[];
   /** Show inline buttons for first N actions on desktop */
   inlineCount?: number;
+  /**
+   * Labels to surface as visible buttons, in this order — e.g. ["View", "Edit", "Delete"].
+   * Matched on the start of the label so "View Details" answers to "View".
+   * Takes precedence over inlineCount, which can only take actions positionally
+   * and would otherwise promote whatever happens to sit first in the array.
+   */
+  primary?: string[];
 }
 
 const variantClasses: Record<string, string> = {
@@ -39,12 +46,30 @@ const inlineVariantClasses: Record<string, string> = {
   purple: "text-muted-foreground hover:text-violet-600 hover:bg-violet-500/10",
 };
 
-export default function AdminActionMenu({ actions, inlineCount = 0 }: AdminActionMenuProps) {
+export default function AdminActionMenu({ actions, inlineCount = 0, primary }: AdminActionMenuProps) {
   const visible = actions.filter((a) => !a.hidden);
   if (visible.length === 0) return null;
 
-  const inlineActions = visible.slice(0, inlineCount);
-  const menuActions = visible.slice(inlineCount);
+  let inlineActions: ActionItem[];
+  let menuActions: ActionItem[];
+
+  if (primary && primary.length > 0) {
+    const taken = new Set<ActionItem>();
+    inlineActions = [];
+    primary.forEach((label) => {
+      const match = visible.find(
+        (a) => !taken.has(a) && a.label.toLowerCase().startsWith(label.toLowerCase())
+      );
+      if (match) {
+        taken.add(match);
+        inlineActions.push(match);
+      }
+    });
+    menuActions = visible.filter((a) => !taken.has(a));
+  } else {
+    inlineActions = visible.slice(0, inlineCount);
+    menuActions = visible.slice(inlineCount);
+  }
 
   return (
     <div className="flex items-center gap-1">

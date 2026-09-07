@@ -3,7 +3,7 @@ import { format, parseISO } from "date-fns";
 import { toast } from "sonner";
 import {
   FileText, Search, Filter, Eye, CheckCircle, XCircle, Printer, FileDown,
-  Mail, Pencil, RefreshCw,
+  Mail, Pencil, RefreshCw, Trash2,
 } from "lucide-react";
 import { supabase } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
@@ -14,11 +14,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useCanModifyFinancials, useAdminRole } from "@/components/admin/AdminLayout";
+import AdminActionMenu from "@/components/admin/AdminActionMenu";
 import { formatBDT, cn } from "@/lib/utils";
 import { exportPDF, exportExcel } from "@/lib/reportExport";
 import { generateInvoiceFromRecord } from "@/lib/invoiceGenerator";
 import {
-  fetchInvoices, fetchInvoiceById, invoiceAction, updateInvoiceRecord,
+  fetchInvoices, fetchInvoiceById, invoiceAction, updateInvoiceRecord, deleteInvoiceRecord,
   INVOICE_STATUSES, INVOICE_SERVICE_TYPES, parseFlightDetails,
   statusBadgeClass, serviceTypeLabel, statusLabel, type InvoiceRecord, type FlightDetails,
 } from "@/lib/invoiceRecords";
@@ -35,6 +36,8 @@ export default function AdminInvoicesPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [detail, setDetail] = useState<InvoiceRecord | null>(null);
   const [editFlight, setEditFlight] = useState<FlightDetails>({});
+  const [deleteRow, setDeleteRow] = useState<InvoiceRecord | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const [filters, setFilters] = useState({
@@ -89,6 +92,22 @@ export default function AdminInvoicesPage() {
       if (detail?.id === id) setDetail(updated);
     } catch (err: any) {
       toast.error(err.message);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteRow) return;
+    setDeleting(true);
+    try {
+      await deleteInvoiceRecord(deleteRow.id);
+      toast.success(`Invoice ${deleteRow.invoice_number} deleted`);
+      setDeleteRow(null);
+      load();
+    } catch (err: any) {
+      // The server refuses paid or finalised invoices; show its reason as-is.
+      toast.error(err?.message || 'Could not delete this invoice');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -235,15 +254,20 @@ export default function AdminInvoicesPage() {
                     <TableCell className="text-right text-sm text-destructive">{formatBDT(Number(r.due_amount))}</TableCell>
                     <TableCell><Badge variant="outline" className={cn("text-[10px] capitalize", statusBadgeClass(r.status))}>{statusLabel(r.status)}</Badge></TableCell>
                     <TableCell>
-                      <div className="flex justify-end gap-1">
-                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => openDetail(r)} title="View"><Eye className="h-3.5 w-3.5" /></Button>
-                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => downloadPdf(r)} title="PDF"><FileDown className="h-3.5 w-3.5" /></Button>
-                        {canApprove && r.status === "draft" && (
-                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => runAction(r.id, "approve")} title="Approve"><CheckCircle className="h-3.5 w-3.5 text-emerald-600" /></Button>
-                        )}
-                        {canApprove && ["approved", "partially_paid"].includes(r.status) && (
-                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => runAction(r.id, "finalize")} title="Finalize"><CheckCircle className="h-3.5 w-3.5 text-blue-600" /></Button>
-                        )}
+                      <div className="flex justify-end">
+                        <AdminActionMenu
+                          primary={["View", "Edit", "Delete"]}
+                          actions={[
+                            { label: "View", icon: <Eye className="h-3.5 w-3.5" />, onClick: () => openDetail(r) },
+                            // The detail dialog is also the editor — flight details are saved from it.
+                            { label: "Edit", icon: <Pencil className="h-3.5 w-3.5" />, onClick: () => openDetail(r), variant: "warning", hidden: !canApprove },
+                            { label: "Delete", icon: <Trash2 className="h-3.5 w-3.5" />, onClick: () => setDeleteRow(r), variant: "destructive", hidden: !canApprove },
+                            { label: "PDF", icon: <FileDown className="h-3.5 w-3.5" />, onClick: () => downloadPdf(r), separator: true },
+                            { label: "Approve", icon: <CheckCircle className="h-3.5 w-3.5" />, onClick: () => runAction(r.id, "approve"), variant: "success", hidden: !canApprove || r.status !== "draft" },
+                            { label: "Finalize", icon: <CheckCircle className="h-3.5 w-3.5" />, onClick: () => runAction(r.id, "finalize"), variant: "success", hidden: !canApprove || !["approved", "partially_paid"].includes(r.status) },
+                            { label: "Cancel Invoice", icon: <XCircle className="h-3.5 w-3.5" />, onClick: () => runAction(r.id, "cancel"), variant: "warning", hidden: !canApprove || ["cancelled", "paid"].includes(r.status) },
+                          ]}
+                        />
                       </div>
                     </TableCell>
                   </TableRow>
@@ -336,6 +360,29 @@ export default function AdminInvoicesPage() {
               </div>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete confirmation — the server still refuses paid or finalised invoices */}
+      <Dialog open={!!deleteRow} onOpenChange={(o) => { if (!o) setDeleteRow(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-heading">Delete invoice?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Invoice <span className="font-medium text-foreground">{deleteRow?.invoice_number}</span> will be
+            removed permanently, along with its audit trail. This cannot be undone.
+          </p>
+          <p className="text-xs text-muted-foreground">
+            An invoice that already has payments against it, or one that has been finalised, cannot be deleted —
+            cancel it instead so the numbering and the ledger keep their history.
+          </p>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" size="sm" onClick={() => setDeleteRow(null)}>Keep it</Button>
+            <Button variant="destructive" size="sm" onClick={confirmDelete} disabled={deleting}>
+              {deleting ? "Deleting..." : "Delete invoice"}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

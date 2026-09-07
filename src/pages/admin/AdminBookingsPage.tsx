@@ -1145,7 +1145,7 @@ export default function AdminBookingsPage() {
                       })()}
                     </td>
                     <td className="py-3 px-2 text-center" onClick={(e) => e.stopPropagation()}>
-                      <AdminActionMenu actions={getBookingActions(b)} inlineCount={0} />
+                      <AdminActionMenu actions={getBookingActions(b)} primary={["View", "Edit", "Delete"]} />
                     </td>
                   </tr>
                 );

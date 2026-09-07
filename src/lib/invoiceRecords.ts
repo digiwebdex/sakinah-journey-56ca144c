@@ -155,6 +155,11 @@ export async function invoiceAction(id: string, action: 'submit' | 'approve' | '
   return apiRequest(`/invoices/${id}/action/${action}`, { method: 'POST', body: JSON.stringify(payload || {}) }) as Promise<InvoiceRecord>;
 }
 
+/** Refused by the server once the invoice carries payments or has been finalised. */
+export async function deleteInvoiceRecord(id: string) {
+  return apiRequest(`/invoices/${id}`, { method: 'DELETE' }) as Promise<{ ok: boolean; invoice_number: string }>;
+}
+
 export async function syncInvoiceFromBooking(bookingId: string) {
   return apiRequest(`/invoices/sync/booking/${bookingId}`, { method: 'POST', body: '{}' }) as Promise<InvoiceRecord>;
 }

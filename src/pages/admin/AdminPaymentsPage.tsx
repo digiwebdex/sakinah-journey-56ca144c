@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/api";
 import { unpaidPaxFor } from "@/lib/packageSupplierSummary";
 import { toast } from "sonner";
-import { Download, Edit2, Trash2, Save, X, Plus, Wallet, Search, CheckCircle, XCircle, Upload, FileText, Loader2, FileDown, FileSpreadsheet, ChevronDown, ChevronRight } from "lucide-react";
+import { Download, Edit2, Trash2, Save, X, Plus, Wallet, Search, CheckCircle, XCircle, Upload, FileText, Loader2, FileDown, FileSpreadsheet, ChevronDown, ChevronRight, Eye } from "lucide-react";
 import { exportPDF, exportExcel } from "@/lib/reportExport";
 import { generateReceipt, CompanyInfo, InvoicePayment } from "@/lib/invoiceGenerator";
 import { getCompanyInfoForPdf } from "@/lib/entityPdfGenerator";
@@ -606,7 +606,8 @@ export default function AdminPaymentsPage() {
                           <td className="py-2.5 px-4 text-xs">{p.date ? new Date(p.date).toLocaleDateString() : "—"}</td>
                           <td className="py-2.5 px-4 text-xs text-muted-foreground truncate max-w-[150px]">{cleanNotes || "—"}</td>
                           <td className="py-2.5 px-4" onClick={(e) => e.stopPropagation()}>
-                             <AdminActionMenu inlineCount={0} actions={[
+                             <AdminActionMenu primary={["View", "Edit", "Delete"]} actions={[
+                              { label: "View", icon: <Eye className="h-3.5 w-3.5" />, onClick: () => setViewPayment({ ...p, _type: "moallem" }) },
                               { label: "Edit", icon: <Edit2 className="h-3.5 w-3.5" />, onClick: () => startEdit({ ...p, _type: "moallem" }), variant: "warning", hidden: !canModify },
                               { label: "Delete", icon: <Trash2 className="h-3.5 w-3.5" />, onClick: () => { setDeleteId(p.id); setDeleteType("moallem"); }, variant: "destructive", hidden: !canModify },
                              ]} />
@@ -679,7 +680,8 @@ export default function AdminPaymentsPage() {
                           <td className="py-2.5 px-4 text-xs">{p.date ? new Date(p.date).toLocaleDateString() : "—"}</td>
                           <td className="py-2.5 px-4 text-xs text-muted-foreground truncate max-w-[150px]">{cNotes || "—"}</td>
                           <td className="py-2.5 px-4" onClick={(e) => e.stopPropagation()}>
-                             <AdminActionMenu inlineCount={0} actions={[
+                             <AdminActionMenu primary={["View", "Edit", "Delete"]} actions={[
+                              { label: "View", icon: <Eye className="h-3.5 w-3.5" />, onClick: () => setViewPayment({ ...p, _type: "supplier" }) },
                               { label: "Edit", icon: <Edit2 className="h-3.5 w-3.5" />, onClick: () => startEdit({ ...p, _type: "supplier" }), variant: "warning", hidden: !canModify },
                               { label: "Delete", icon: <Trash2 className="h-3.5 w-3.5" />, onClick: () => { setDeleteId(p.id); setDeleteType("supplier"); }, variant: "destructive", hidden: !canModify },
                              ]} />
@@ -781,7 +783,8 @@ export default function AdminPaymentsPage() {
                     </td>
                     <td className="py-3" onClick={(e) => e.stopPropagation()}>
                       {(p._type === "moallem" || p._type === "supplier") ? (
-                        <AdminActionMenu inlineCount={1} actions={[
+                        <AdminActionMenu primary={["View", "Edit", "Delete"]} actions={[
+                          { label: "View", icon: <Eye className="h-3.5 w-3.5" />, onClick: () => setViewPayment(p) },
                           { label: "PDF", icon: <FileDown className="h-3.5 w-3.5" />, onClick: () => exportPDF({ title: `Payment - ${p._displayName}`, columns: ["Type", p._type === "supplier" ? "Package" : "Tracking ID", "Name", "Amount", "Method", "Date"], rows: [[badge.label, p._type === "supplier" ? ((p as any)._packageName || p._trackingId) : p._trackingId, p._displayName, p._amount, p.payment_method || "—", p.date ? new Date(p.date).toLocaleDateString() : "—"]], summary: [`Total Amount: BDT ${p._amount.toLocaleString("en-IN")}`] }) },
                           { label: "Edit", icon: <Edit2 className="h-3.5 w-3.5" />, onClick: () => startEdit(p), variant: "warning", hidden: !canModify },
                           { label: "Delete", icon: <Trash2 className="h-3.5 w-3.5" />, onClick: () => { setDeleteId(p.id); setDeleteType(p._type); }, variant: "destructive", hidden: !canModify },
@@ -793,8 +796,9 @@ export default function AdminPaymentsPage() {
                         </div>
                       ) : (
                         <AdminActionMenu
-                          inlineCount={2}
+                          primary={["View", "Edit", "Delete"]}
                           actions={[
+                            { label: "View", icon: <Eye className="h-3.5 w-3.5" />, onClick: () => setViewPayment(p) },
                             { label: "PDF", icon: <FileDown className="h-3.5 w-3.5" />, onClick: () => exportPDF({ title: `Payment - ${p._displayName}`, columns: ["Type", "Tracking ID", "Name", "Amount", "Method", "Date", "Status"], rows: [[badge.label, p._trackingId, p._displayName, p._amount, p.payment_method || "—", p.paid_at ? new Date(p.paid_at).toLocaleDateString() : p.due_date ? new Date(p.due_date).toLocaleDateString() : "—", p.status]], summary: [`Total Amount: BDT ${p._amount.toLocaleString("en-IN")}`] }) },
                             { label: "Edit", icon: <Edit2 className="h-3.5 w-3.5" />, onClick: () => startEdit(p), variant: "warning", hidden: !canModify },
                             { label: "Delete", icon: <Trash2 className="h-3.5 w-3.5" />, onClick: () => { setDeleteId(p.id); setDeleteType("customer"); }, variant: "destructive", hidden: !canModify, separator: true },

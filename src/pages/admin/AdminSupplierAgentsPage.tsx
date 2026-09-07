@@ -444,7 +444,7 @@ export default function AdminSupplierAgentsPage() {
                         </span>
                       </td>
                       <td className="py-3 px-3 text-center" onClick={e => e.stopPropagation()}>
-                        <AdminActionMenu actions={getActions(a)} inlineCount={2} />
+                        <AdminActionMenu actions={getActions(a)} primary={["View", "Edit", "Delete"]} />
                       </td>
                     </tr>
                   );
